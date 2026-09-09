@@ -6,6 +6,8 @@ The plugin is named `dashboard_view`. Installing it does **not** create views. A
 
 See [installation](docs/installation.md), [user guide](docs/user-guide.md) and [validation](docs/validation.md).
 
+[Try the development example](https://data.dev-wins.com/es/dashboard/70441d68-3fa1-4e54-b7be-f87b6b27f515) with 20,000 clearly labelled synthetic observations.
+
 ## Development
 
 ```bash
