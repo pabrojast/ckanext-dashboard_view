@@ -1,0 +1,7 @@
+<link rel="stylesheet" href="{{ h.dashboard_asset('dashboard.css') }}">
+<div data-dashboard>
+  <script type="application/json" data-dashboard-bootstrap>{{ dashboard_view_bootstrap|tojson }}</script>
+  <div hidden data-dashboard-csrf>{{ h.csrf_input() }}</div>
+  <noscript><p>{{ _('Enable JavaScript to explore this dashboard.') }}</p></noscript>
+</div>
+<script type="module" src="{{ h.dashboard_asset('dashboard.js') }}"></script>

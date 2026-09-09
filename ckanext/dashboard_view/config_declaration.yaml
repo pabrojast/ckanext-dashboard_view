@@ -1,0 +1,47 @@
+version: 1
+groups:
+  - annotation: Dashboard Builder
+    options:
+      - key: ckanext.dashboard_view.cache_dir
+        default: /var/lib/ckan/dashboard-cache
+        description: Private shared filesystem directory for CKAN and both dashboard workers.
+      - key: ckanext.dashboard_view.refresh_seconds
+        default: 300
+        type: int
+        description: Revalidate a source this often while its dashboard is in use.
+      - key: ckanext.dashboard_view.max_file_bytes
+        default: 268435456
+        type: int
+      - key: ckanext.dashboard_view.max_rows
+        default: 5000000
+        type: int
+      - key: ckanext.dashboard_view.max_columns
+        default: 500
+        type: int
+      - key: ckanext.dashboard_view.max_xlsx_uncompressed_bytes
+        default: 1073741824
+        type: int
+      - key: ckanext.dashboard_view.max_export_bytes
+        default: 1073741824
+        type: int
+      - key: ckanext.dashboard_view.memory_limit
+        default: 1GB
+        description: DuckDB memory limit; keep below the worker container memory limit.
+      - key: ckanext.dashboard_view.build_timeout
+        default: 900
+        type: int
+      - key: ckanext.dashboard_view.query_timeout
+        default: 90
+        type: int
+      - key: ckanext.dashboard_view.download_timeout
+        default: 120
+        type: int
+      - key: ckanext.dashboard_view.queue_build
+        default: dashboard-build
+      - key: ckanext.dashboard_view.queue_query
+        default: dashboard-query
+      - key: ckanext.dashboard_view.basemap_url
+        default: https://tiles.openfreemap.org/styles/positron
+      - key: ckanext.dashboard_view.frame_ancestors
+        default: '*'
+        description: CSP frame-ancestors for the embed route. Does not grant dataset access.

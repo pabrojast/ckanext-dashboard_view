@@ -1,0 +1,11 @@
+{% extends "page.html" %}
+{% block subtitle %}{{ dashboard_title }}{% endblock %}
+{% block breadcrumb_content %}<li><a href="{{ dashboard_view_bootstrap.resource_url }}">{{ h.resource_display_name(resource) }}</a></li><li class="active">{{ dashboard_title }}</li>{% endblock %}
+{% block primary %}
+<article class="module" style="width:100%; min-width:0">
+  <div class="module-content">
+    {% include "dashboard_view/resource_view.html" %}
+  </div>
+</article>
+{% endblock %}
+{% block secondary %}{% endblock %}

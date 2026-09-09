@@ -1,0 +1,13 @@
+# Derive from the exact running dev image. Never use a production tag here.
+ARG BASE_IMAGE
+ARG DUCKDB_WHEEL_IMAGE=dashboard-duckdb-wheel:1.5.5
+FROM ${DUCKDB_WHEEL_IMAGE} AS wheels
+FROM ${BASE_IMAGE}
+USER root
+COPY --from=wheels /wheels /wheels
+COPY . /opt/ckanext-dashboard_view
+RUN pip install --no-cache-dir --find-links=/wheels /opt/ckanext-dashboard_view && \
+    python /opt/ckanext-dashboard_view/deploy/configure_image.py && \
+    mkdir -p /var/lib/ckan/dashboard-cache && \
+    chown -R ckan:ckan /var/lib/ckan/dashboard-cache
+USER ckan

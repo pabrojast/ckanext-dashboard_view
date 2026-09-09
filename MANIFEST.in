@@ -1,0 +1,5 @@
+include README.md LICENSE
+recursive-include ckanext/dashboard_view/templates *.html
+recursive-include ckanext/dashboard_view/public *
+include ckanext/dashboard_view/config_declaration.yaml
+recursive-include docs *.md

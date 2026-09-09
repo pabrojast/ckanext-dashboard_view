@@ -1,0 +1,90 @@
+name: dashboard-view-local
+services:
+  ckan:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: ${DASHBOARD_IMAGE:-dashboard-view-test}
+    working_dir: /srv/app
+    command: ["bash", "/plugin/scripts/local-start.sh"]
+    ports: ["127.0.0.1:5189:5000"]
+    environment: &ckan-env
+      CKAN_INI: /srv/app/ckan.ini
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:localonly@db/ckan_default
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:localonly@db/datastore_default
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:localonly@db/datastore_default
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+      CKAN_SITE_URL: http://127.0.0.1:5189
+      CKAN__PLUGINS: envvars image_view text_view datastore activity dashboard_view
+      CKAN__STORAGE_PATH: /var/lib/ckan/storage
+      CKANEXT__DASHBOARD_VIEW__CACHE_DIR: /var/lib/ckan/dashboard-cache
+      CKAN_SYSADMIN_NAME: dashboard_admin
+      CKAN_SYSADMIN_PASSWORD: local-dashboard-only
+      CKAN_SYSADMIN_EMAIL: dashboard-admin@example.invalid
+      USE_DEBUGPY_FOR_DEV: "false"
+      USE_HTTPS_FOR_DEV: "false"
+    depends_on:
+      db: {condition: service_healthy}
+      solr: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes:
+      - storage:/var/lib/ckan/storage
+      - cache:/var/lib/ckan/dashboard-cache
+  build-worker:
+    image: ${DASHBOARD_IMAGE:-dashboard-view-test}
+    working_dir: /srv/app
+    command: ["bash", "/plugin/scripts/local-start.sh", "worker", "build"]
+    environment: *ckan-env
+    depends_on: [ckan]
+    volumes:
+      - storage:/var/lib/ckan/storage
+      - cache:/var/lib/ckan/dashboard-cache
+    mem_limit: 2g
+  query-worker:
+    image: ${DASHBOARD_IMAGE:-dashboard-view-test}
+    working_dir: /srv/app
+    command: ["bash", "/plugin/scripts/local-start.sh", "worker", "query"]
+    environment: *ckan-env
+    depends_on: [ckan]
+    volumes:
+      - storage:/var/lib/ckan/storage
+      - cache:/var/lib/ckan/dashboard-cache
+    mem_limit: 2g
+  db:
+    image: ckan/ckan-postgres-dev:2.10
+    environment:
+      PGDATA: /var/lib/postgresql/data/dashboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localonly
+      POSTGRES_DB: postgres
+      CKAN_POSTGRES_USER: ckan_default
+      CKAN_POSTGRES_USER_PWD: localonly
+      CKAN_POSTGRES_DB: ckan_default
+      CKAN_DATASTORE_POSTGRES_READ_USER: datastore_read
+      CKAN_DATASTORE_POSTGRES_READ_PWD: localonly
+      CKAN_DATASTORE_POSTGRES_WRITE_USER: datastore_write
+      CKAN_DATASTORE_POSTGRES_WRITE_PWD: localonly
+      CKAN_DATASTORE_POSTGRES_DB: datastore_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  solr:
+    image: ckan/ckan-solr:2.10-solr9
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8983/solr/ckan/admin/ping >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  storage:
+  cache:

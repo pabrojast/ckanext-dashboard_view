@@ -1,0 +1,8 @@
+<link rel="stylesheet" href="{{ h.dashboard_asset('dashboard.css') }}">
+<input type="hidden" name="dashboard_config" value="{{ dashboard_config_json }}">
+{% if errors.dashboard_config %}<div class="alert alert-danger" role="alert">{{ errors.dashboard_config|join(', ') }}</div>{% endif %}
+<div data-dashboard>
+  <script type="application/json" data-dashboard-bootstrap>{{ dashboard_editor_bootstrap|tojson }}</script>
+  <noscript><div class="alert alert-warning">{{ _('Enable JavaScript to design your dashboard.') }}</div></noscript>
+</div>
+<script type="module" src="{{ h.dashboard_asset('dashboard.js') }}"></script>

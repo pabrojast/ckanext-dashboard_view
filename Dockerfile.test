@@ -1,0 +1,10 @@
+ARG DUCKDB_WHEEL_IMAGE=dashboard-duckdb-wheel:1.5.5
+FROM ${DUCKDB_WHEEL_IMAGE} AS wheels
+FROM ckan/ckan-dev:2.10
+USER root
+COPY --from=wheels /wheels /wheels
+COPY . /plugin
+RUN pip install --find-links=/wheels -e '/plugin[test]' && \
+    ln -sf "$(command -v ckan)" /usr/local/bin/ckan && \
+    ln -sf "$(command -v python3)" /usr/local/bin/python
+WORKDIR /plugin

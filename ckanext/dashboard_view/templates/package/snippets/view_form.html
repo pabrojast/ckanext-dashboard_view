@@ -1,0 +1,7 @@
+{% ckan_extends %}
+
+{% block view_form_filters %}
+  {% if resource_view.view_type != 'dashboard_view' %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}

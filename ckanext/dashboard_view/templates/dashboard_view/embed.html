@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="{{ dashboard_view_bootstrap.lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ dashboard_title }}</title>
+  <link rel="stylesheet" href="{{ h.dashboard_asset('dashboard.css') }}">
+  <style>html,body{margin:0;min-width:0;background:#f4f7fb}body{font-family:system-ui,sans-serif}</style>
+</head>
+<body>
+  <main aria-label="{{ dashboard_title }}">
+    <div data-dashboard>
+      <script type="application/json" data-dashboard-bootstrap>{{ dashboard_view_bootstrap|tojson }}</script>
+      <div hidden data-dashboard-csrf>{{ h.csrf_input() }}</div>
+      <noscript><p>{{ _('Enable JavaScript to explore this dashboard.') }}</p></noscript>
+    </div>
+  </main>
+  <script type="module" src="{{ h.dashboard_asset('dashboard.js') }}"></script>
+</body>
+</html>

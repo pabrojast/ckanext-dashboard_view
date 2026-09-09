@@ -1,0 +1,7 @@
+# Alpine needs a native DuckDB wheel. Build once and reuse in CKAN images.
+ARG WHEEL_CACHE_IMAGE=ckan/ckan-dev:2.10
+FROM ${WHEEL_CACHE_IMAGE} AS builder
+USER root
+RUN pip wheel --no-deps duckdb==1.5.5 --wheel-dir /wheels
+FROM scratch
+COPY --from=builder /wheels /wheels
