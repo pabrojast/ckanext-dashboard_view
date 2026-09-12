@@ -11,6 +11,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Bounds, Result, Widget, Filter } from './types';
 import type { Translator } from './i18n';
 import { button, el } from './dom';
+import { basemapStyle } from './maps/basemap';
 Chart.register(...registerables);
 setWorkerUrl(workerUrl);
 export interface Handle {
@@ -336,13 +337,7 @@ function renderMap(
   try {
     map = new MapLibreMap({
       container: mapDiv,
-      style: ctx.basemap || {
-        version: 8,
-        sources: {},
-        layers: [
-          { id: 'background', type: 'background', paint: { 'background-color': '#e7f0f3' } },
-        ],
-      },
+      style: basemapStyle(ctx.basemap),
       center: [0, 20],
       zoom: 1,
       pitch: 0,

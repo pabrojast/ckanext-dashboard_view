@@ -16,6 +16,13 @@ Use Node 22.12 or newer. Locked versions are checked in. The production build em
 `/dashboard-static/`; runtime libraries and the map worker are local assets.
 Only the configured map style can request external basemap data.
 
+The default Positron basemap uses the bundled `src/maps/positron-borderless.json`
+style from Ofform: national and disputed borders are omitted, while regional
+boundaries, place labels and attribution remain. Both an absent `basemap_url` and
+the existing `https://tiles.openfreemap.org/styles/positron` URL select this style.
+Other styles configured through `ckanext.dashboard_view.basemap_url` are used as
+provided. Each map gets an independent copy of the bundled style.
+
 For frontend development, start `scripts/dev_server.py` on port 5188 as described
 in the project README, then run `npm run dev -- --port 5190`. Open
 `http://127.0.0.1:5190/dashboard-static/?lang=es` (`en` and `fr` are also supported).
