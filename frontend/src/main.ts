@@ -148,7 +148,14 @@ class Dashboard {
           for (const item of this.canvas.querySelectorAll<HTMLElement>('[data-widget-id]')) {
             const active = item.dataset.widgetId === state.widgetId;
             item.classList.toggle('is-story-highlighted', active);
-            if (active) item.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+            if (active) {
+              // scrollIntoView also scrolls the host story through the iframe,
+              // changing its active paragraph and resetting the narrative state.
+              const rect = item.getBoundingClientRect();
+              const offset = rect.top < 0 ? rect.top : Math.max(0,
+                Math.min(rect.top, rect.bottom - window.innerHeight));
+              if (offset) window.scrollBy({ top: offset, behavior: 'instant' });
+            }
           }
           this.renderFilters();
           return this.loadQuery();
