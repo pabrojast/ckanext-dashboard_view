@@ -17,6 +17,7 @@ import {
 import { translator, type Translator } from './i18n';
 import { button, download, el, icon } from './dom';
 import { renderWidget, type Handle } from './render';
+import { connectStoryBridge } from './storyBridge';
 
 const TYPES: WidgetType[] = [
   'kpi',
@@ -74,6 +75,7 @@ class Dashboard {
   refreshTimer?: number;
   refreshPoll?: number;
   ready = false;
+  storyReady?: () => void;
   layoutLoading = false;
   abort = new AbortController();
   constructor(root: HTMLElement, boot: Bootstrap) {
@@ -134,6 +136,25 @@ class Dashboard {
     root.setAttribute('lang', boot.lang || 'en');
     this.build();
     this.sync();
+    if (boot.mode === 'view' && boot.view_id && window.parent !== window) {
+      this.storyReady = connectStoryBridge({
+        viewId: boot.view_id, signal: this.abort.signal,
+        metadata: () => ({ profile: this.profile, config: this.config }),
+        apply: async state => {
+          clearTimeout(this.requestTimer);
+          this.filters = clone(state.filters);
+          this.bounds = null;
+          this.pages = {};
+          for (const item of this.canvas.querySelectorAll<HTMLElement>('[data-widget-id]')) {
+            const active = item.dataset.widgetId === state.widgetId;
+            item.classList.toggle('is-story-highlighted', active);
+            if (active) item.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+          }
+          this.renderFilters();
+          return this.loadQuery();
+        },
+      });
+    }
     void this.loadProfile();
     this.refreshTimer = window.setInterval(() => {
       if (!document.hidden) void this.loadProfile(false);
@@ -386,6 +407,7 @@ class Dashboard {
       this.renderInspector();
       this.renderFilters();
       this.renderEmpty();
+      this.storyReady?.();
       await this.loadQuery();
     } catch (error) {
       if (request === this.profileRequest)
@@ -450,11 +472,13 @@ class Dashboard {
         this.status.append(icon('info'), el('span', '', warnings.join(' · ')));
       }
       this.canvas.setAttribute('aria-busy', 'false');
+      return true;
     } catch (error) {
       if (request === this.queryRequest) {
         this.canvas.setAttribute('aria-busy', 'false');
         this.showStatus(error instanceof Error ? error.message : this.t('error'), true);
       }
+      return false;
     }
   }
   revalidateLater(refreshing: boolean) {

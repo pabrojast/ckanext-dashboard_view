@@ -1521,3 +1521,5 @@
 .dbv .dbv-input {
   font-weight: 400;
 }
+/* Narrative focus does not change the saved dashboard selection or layout. */
+.dbv [data-widget-id].is-story-highlighted { outline: 3px solid var(--dbv-accent, #0069b4); outline-offset: -3px; }

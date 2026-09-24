@@ -89,3 +89,13 @@ The example is clearly labelled synthetic and is not research data. Creation is 
 The temporary administrative QA token was revoked after these checks, and its local token file was removed; retrying an authenticated action returned 403. No portal editor integration or production deployment was performed.
 
 Final public browser checks passed with no authentication: 20,000 rows and eight blocks, desktop and 390 px mobile embeds without horizontal overflow. A parent page at `http://127.0.0.1:5188` successfully embedded the HTTPS dev dashboard with zero console errors or warnings. Basemap and observation markers were visually confirmed. Screenshots: `output/playwright/dev-public-embed-desktop-final.png`, `dev-public-embed-mobile-final.png`, `dev-cross-origin-desktop-final.png` and `dev-cross-origin-map-final.png`. The IHP site header has an existing desktop overflow outside the dashboard; the isolated embed has none.
+
+Narrative bridge regression checks:
+
+```sh
+cd frontend
+node --experimental-strip-types --test tests/storyBridge.test.mjs
+npm run build
+```
+
+Check the embedded viewer from a same-origin parent: metadata, filter application, highlighted widget, stale reply handling, and unchanged persisted resource-view configuration. External windows/origins must not control the viewer. The Pages repository contains the integrated authoring and presentation browser harness.
