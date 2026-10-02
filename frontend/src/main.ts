@@ -209,10 +209,8 @@ class Dashboard {
     this.inspector.setAttribute('aria-label', this.t('properties'));
     workspace.append(this.catalog, middle, this.inspector);
     const footer = el('footer', 'dbv-footer');
-    footer.append(
-      el('span', '', this.t('keyboard')),
-      el('span', 'dbv-brand-credit', 'IHP-WINS · Citizen science'),
-    );
+    footer.append(el('span', '', this.t('keyboard')));
+    if (this.boot.brand) footer.append(el('span', 'dbv-brand-credit', this.boot.brand));
     this.toast = el('div', 'dbv-toast');
     this.toast.setAttribute('role', 'status');
     this.toast.hidden = true;

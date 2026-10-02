@@ -32,6 +32,7 @@ def bootstrap(resource, view, actor=None, mode='view', package=None):
         'mode': mode, 'resource_id': resource['id'], 'view_id': view_id,
         'title': view.get('title') or tk._('Dashboard'), 'config': config,
         'lang': str(language or 'en'),
+        'brand': tk.config.get('ckan.site_title') or '',
         'api_base': tk.url_for('dashboard_view.profile', resource_id=resource['id']).rsplit('/', 1)[0],
         'view_url': tk.url_for('dashboard_view.view', view_id=view_id, _external=True) if view_id else '',
         'embed_url': tk.url_for('dashboard_view.embed', view_id=view_id, _external=True) if view_id else '',

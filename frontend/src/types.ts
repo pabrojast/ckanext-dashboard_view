@@ -75,6 +75,7 @@ export interface Bootstrap {
   title: string;
   config: Config;
   lang: string;
+  brand?: string;
   api_base: string;
   view_url?: string;
   embed_url?: string;

@@ -118,7 +118,7 @@ const en = {
   saved: 'Saved',
   shareTitle: 'Share this dashboard',
   shareBody:
-    'Embed the published dashboard in Citizens4Water, CS Toolbox or another website. Access follows the resource permissions.',
+    'Embed the published dashboard in another website. Access follows the resource permissions.',
   link: 'Dashboard link',
   embed: 'Embed code',
   height: 'Height (pixels)',
@@ -307,7 +307,7 @@ const es: Record<Key, string> = {
   saved: 'Guardado',
   shareTitle: 'Comparte este dashboard',
   shareBody:
-    'Inserta el dashboard publicado en Citizens4Water, CS Toolbox u otro sitio web. Se mantienen los permisos del recurso.',
+    'Inserta el dashboard publicado en otro sitio web. Se mantienen los permisos del recurso.',
   link: 'Enlace al dashboard',
   embed: 'Código para insertar',
   height: 'Altura (píxeles)',
@@ -497,7 +497,7 @@ const fr: Record<Key, string> = {
   saved: 'Enregistré',
   shareTitle: 'Partager ce tableau de bord',
   shareBody:
-    'Intégrez le tableau de bord publié dans Citizens4Water, CS Toolbox ou un autre site. Les permissions de la ressource restent applicables.',
+    'Intégrez le tableau de bord publié dans un autre site. Les permissions de la ressource restent applicables.',
   link: 'Lien du tableau de bord',
   embed: 'Code d’intégration',
   height: 'Hauteur (pixels)',
