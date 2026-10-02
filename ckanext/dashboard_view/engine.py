@@ -519,7 +519,9 @@ def _chart_result(connection, widget, fields, where, params, count):
     x = _require(widget, "x_field", fields)
     if widget["time_grain"] != "none":
         _require(widget, "x_field", fields, {"date"})
-        x = "date_trunc('%s', %s)" % (widget["time_grain"], x)
+        # ::TIMESTAMP keeps the labels identical across DuckDB versions
+        # (1.3 returns DATE for day/month grains, 1.5 a TIMESTAMP).
+        x = "date_trunc('%s', %s)::TIMESTAMP" % (widget["time_grain"], x)
     aggregate = _aggregate(widget, fields)
     sort = "ASC" if widget["sort"] == "asc" else "DESC"
     order = "x ASC NULLS LAST" if widget["type"] in {"line", "area"} else "value %s NULLS LAST, x ASC NULLS LAST" % sort
