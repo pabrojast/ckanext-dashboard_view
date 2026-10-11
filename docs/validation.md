@@ -21,6 +21,27 @@ The HTTP test creates isolated fixtures, saves a view through CKAN's native form
 
 Browser verification covers editing, source interpretation, filters, save/reload, keyboard and pointer layout changes, undo/redo, responsive layouts, exports, and an iframe hosted from another origin. Unit test success alone does not establish these behaviors.
 
+## Focused-input save regression — 2026-10-11
+
+Editing a properties field and immediately clicking **Save dashboard** previously
+lost the first click: the field's blur/change handler replaced the toolbar between
+pointerdown and click. Configuration changes now update the saved/unsaved indicator
+and Undo/Redo disabled states in place. Mode changes still rebuild the toolbar.
+
+The localhost harness with the real engine and native HTML form passed four
+single-click saves, including a focused widget title at 1440 px and 390 px and a
+focused dashboard title. Each save produced exactly one form POST, and reopening
+read the changed value from the saved file. The original titles were restored.
+Undo and Redo were also checked after preserving their existing buttons.
+`npm run build` passed TypeScript validation and regenerated the shipped JavaScript;
+the stylesheet, map worker and Python backend did not change.
+
+Run `scripts/dev_server.py --port 53193 --rows 2000`, open
+`http://127.0.0.1:53193/edit?lang=en` using Playwright CLI, and pass the contents of
+`scripts/browser_save_regression.js` to its `run-code` command. The regression
+refuses non-localhost targets. This record establishes local regression coverage;
+the deployed DEV bundle must be checked separately after release.
+
 ## Automated checks and local integration
 
 - **118 tests passed** with the final backend and engine, including CSV/XLSX parsing, exact statistics, typed filters, multiple maps, parameterized queries, DNS pinning, truncated downloads, CSRF, authorization, cache invalidation and Azure upload signing. The suite also passed inside the stock CKAN 2.10 Alpine image with Python 3.10; CKAN's unrelated pytest plugins were excluded using `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.

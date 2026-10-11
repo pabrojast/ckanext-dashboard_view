@@ -116,7 +116,7 @@ class Dashboard {
         this.root.querySelector<HTMLElement>('.dbv-heading')!.textContent =
           title.value || this.t('defaultTitle');
         this.dirty = true;
-        this.renderToolbar();
+        this.updateToolbarState();
       });
     this.form?.addEventListener('submit', () => {
       this.sync();
@@ -235,8 +235,10 @@ class Dashboard {
       );
       this.toolbar.append(state);
       const undo = button(t('undo'), () => this.undo(), 'dbv-btn dbv-icon-only', 'undo');
+      undo.dataset.dashboardAction = 'undo';
       undo.disabled = !this.history.length;
       const redo = button(t('redo'), () => this.redo(), 'dbv-btn dbv-icon-only', 'redo');
+      redo.dataset.dashboardAction = 'redo';
       redo.disabled = !this.future.length;
       this.toolbar.append(undo, redo);
       const preview = button(
@@ -273,6 +275,18 @@ class Dashboard {
     if (this.boot.mode === 'editor')
       this.toolbar.append(button(t('save'), () => this.save(), 'dbv-btn dbv-btn-primary', 'save'));
   }
+  updateToolbarState() {
+    // A field's change event can run between pointerdown and click on Save.
+    // Keep the buttons attached so committing a focused field cannot consume
+    // that first click (or move keyboard focus away from another action).
+    const state = this.toolbar.querySelector('.dbv-save-state');
+    if (state)
+      state.textContent = this.t(this.dirty || !this.boot.view_id ? 'unsaved' : 'saved');
+    const undo = this.toolbar.querySelector<HTMLButtonElement>('[data-dashboard-action="undo"]');
+    if (undo) undo.disabled = !this.history.length;
+    const redo = this.toolbar.querySelector<HTMLButtonElement>('[data-dashboard-action="redo"]');
+    if (redo) redo.disabled = !this.future.length;
+  }
   renderMode() {
     this.root.classList.toggle('dbv-preview', !this.editing());
     this.root.classList.toggle('dbv-mobile-preview', this.mobile);
@@ -293,7 +307,7 @@ class Dashboard {
       this.future = [];
     }
     this.sync();
-    this.renderToolbar();
+    this.updateToolbarState();
     if (rebuild) {
       this.renderGrid();
       this.renderInspector();
