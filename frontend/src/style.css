@@ -1761,6 +1761,36 @@
   min-width: 32px;
   min-height: 32px;
 }
+/* The portal theme sets paragraph color, size and line height with !important.
+   Scope the reset to dashboard paragraphs so saved dark/custom themes remain
+   readable without changing the surrounding CKAN page. */
+.dbv p {
+  color: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+.dbv p:is(
+  .dbv-guide-help,
+  .dbv-filter-help,
+  .dbv-muted,
+  .dbv-panel-description,
+  .dbv-kpi-context,
+  .dbv-reduction
+) {
+  color: var(--dbv-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+.dbv .dbv-empty > p {
+  color: var(--dbv-canvas-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.8 !important;
+}
+.dbv p.dbv-field-error {
+  color: var(--dbv-error) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
 @media (max-width: 640px) {
   .dbv .dbv-guide {
     padding: 10px 14px;
