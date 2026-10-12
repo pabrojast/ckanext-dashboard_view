@@ -15,6 +15,39 @@ def test_normalizes_safe_versioned_configuration():
     assert "url" not in normalize_source({"url": "file:///etc/passwd"})
 
 
+def test_legacy_appearance_keeps_original_defaults_without_migration():
+    config = normalize_config({"widgets": [{"type": "text"}], "style": {"accent": "#0069b4"}})
+    assert config["schema_version"] == 1
+    assert config["style"] == {
+        "accent": "#0069b4", "theme": "light", "palette": "ihp",
+        "background": None, "card_background": None,
+    }
+    assert normalize_config(config) == config
+
+
+@pytest.mark.parametrize("theme,palette", [("light", "ihp"), ("dark", "accessible"), ("dark", "mono")])
+def test_saved_appearance_round_trips_literal_colors(theme, palette):
+    style = {"accent": "#Aa12Bf", "theme": theme, "palette": palette,
+             "background": "#102030", "card_background": "#ffffff"}
+    config = normalize_config({"widgets": [{"type": "text"}], "style": style})
+    assert config["style"] == style
+    assert normalize_config(json.dumps(config)) == config
+
+
+@pytest.mark.parametrize("style", [
+    None, [], "dark",
+    {"theme": "ocean"}, {"theme": None}, {"theme": []},
+    {"palette": "external"}, {"palette": None}, {"palette": {}},
+    {"background": "red"}, {"background": "#fff"}, {"background": "#12345678"},
+    {"background": "#123456; color:red"}, {"background": "url(https://example.com)"},
+    {"card_background": "var(--portal-color)"}, {"card_background": False},
+    {"accent": None}, {"accent": "#abcdef\n"},
+])
+def test_appearance_rejects_css_and_unknown_presets(style):
+    with pytest.raises(ValueError):
+        normalize_config({"widgets": [{"type": "text"}], "style": style})
+
+
 @pytest.mark.parametrize("value", [None, [], "{", {"schema_version": True}, {"schema_version": 2}, {"widgets": [{}]},
     {"widgets": [{"type": "<script>"}]}, {"widgets": [{"type": []}]},
     {"widgets": [{"type": "text", "id": "__bad<script>"}]},

@@ -61,12 +61,20 @@ export interface Bounds {
   north: number;
   zoom: number;
 }
+/** Optional appearance fields keep saved schema-version-1 dashboards readable. */
+export interface DashboardStyle {
+  accent: string;
+  theme?: 'light' | 'dark';
+  palette?: 'ihp' | 'accessible' | 'mono';
+  background?: string | null;
+  card_background?: string | null;
+}
 export interface Config {
   schema_version: 1;
   source: Source;
   widgets: Widget[];
   filters: FilterDefinition[];
-  style: { accent: string };
+  style: DashboardStyle;
 }
 export interface Bootstrap {
   mode: 'editor' | 'view';

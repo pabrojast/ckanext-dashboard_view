@@ -1,0 +1,71 @@
+// Run with Playwright CLI's run-code against scripts/dev_server.py.
+// Saved changes are restricted to the localhost synthetic fixture.
+async (page) => {
+  const base = new URL(page.url());
+  if (!['127.0.0.1', 'localhost'].includes(base.hostname)) throw Error('Local fixture required');
+  const check = (condition, message) => { if (!condition) throw Error(message); };
+  const edit = new URL('/edit?lang=es', base).href;
+  const root = page.locator('[data-dashboard]');
+  const config = () => page.locator('input[name=dashboard_config]').inputValue().then(JSON.parse);
+  const ready = () => page.locator('.dbv-canvas[aria-busy="false"]').waitFor();
+  const requests = [];
+  const acceptLocalDraft = dialog => dialog.type() === 'beforeunload' ? dialog.accept() : dialog.dismiss();
+  page.on('dialog', acceptLocalDraft);
+  const listener = request => {
+    if (/\/dashboard-api\/.*\/(query|profile)$/.test(request.url())) requests.push(request.url());
+  };
+  page.on('request', listener);
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(edit, {waitUntil:'domcontentloaded'});
+  await ready();
+  await page.getByRole('combobox', {name:'País',exact:true}).selectOption(JSON.stringify('Chile'));
+  await ready();
+  await page.waitForTimeout(350);
+  const selection = await page.getByRole('combobox', {name:'País',exact:true}).inputValue();
+  const map = await page.locator('.dbv-map canvas').elementHandle();
+  const countBefore = requests.length;
+  await page.getByRole('button', {name:'3. Personalizar',exact:true}).click();
+  // Opening the appearance tab must not recreate the map either.
+  const mapAfterGuide = await page.locator('.dbv-map canvas').elementHandle();
+  const sameMapAfterGuide = await map.evaluate((node, other) => node === other, mapAfterGuide);
+  await page.getByRole('button', {name:'Oscuro',exact:true}).click();
+  check(await root.getAttribute('data-dbv-theme') === 'dark', 'Dark theme applied');
+  const background = page.getByRole('textbox', {name:'Fondo del dashboard · HEX',exact:true});
+  await background.fill('#243447'); await background.press('Tab');
+  await page.getByRole('combobox', {name:'Paleta de gráficos',exact:true}).selectOption('accessible');
+  await page.getByRole('button', {name:'Deshacer',exact:true}).click();
+  await page.getByRole('button', {name:'Rehacer',exact:true}).click();
+  await page.waitForTimeout(600);
+  check(requests.length === countBefore, 'Visual changes and history must issue zero data requests');
+  check(await page.getByRole('combobox', {name:'País',exact:true}).inputValue() === selection, 'Filter retained');
+  const currentMap = await page.locator('.dbv-map canvas').elementHandle();
+  check(sameMapAfterGuide && await map.evaluate((node, other) => node === other, currentMap), 'Map canvas retained');
+  const expected = (await config()).style;
+  check(expected.theme === 'dark' && expected.background === '#243447' && expected.palette === 'accessible', 'Appearance config');
+  await page.screenshot({path:'output/playwright/appearance-editor-dark.png'});
+  await root.getByRole('button', {name:'Guardar dashboard',exact:true}).click();
+  await page.waitForURL(new URL('/dashboard/demo',base).href);
+  await ready();
+  check(await root.getAttribute('data-dbv-theme') === 'dark','Saved theme persists in reader');
+  await page.getByRole('button',{name:'Compartir',exact:true}).click();
+  check(await page.getByRole('dialog').getByText(/no incluye los filtros/i).count() === 1,'Sharing explains filter scope');
+  await page.getByRole('button',{name:'Cerrar',exact:true}).click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button',{name:'Descargar PNG',exact:true}).first().click();
+  const download = await downloadPromise;
+  await download.saveAs('output/playwright/appearance-dark-chart.png');
+  check(download.suggestedFilename().endsWith('.png'),'PNG export');
+  await page.goto(new URL('/dashboard/demo/embed?lang=es',base).href,{waitUntil:'domcontentloaded'});
+  await ready();
+  check(await root.getAttribute('data-dbv-theme') === 'dark','Embed retains saved theme');
+  await page.setViewportSize({width:390,height:844});
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),'Mobile embed has no horizontal overflow');
+  await page.screenshot({path:'output/playwright/appearance-embed-mobile-dark.png'});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(edit,{waitUntil:'domcontentloaded'}); await ready();
+  const stored = (await config()).style;
+  check(JSON.stringify(stored) === JSON.stringify(expected),'Reopened editor retains exact appearance');
+  page.off('request',listener);
+  page.off('dialog',acceptLocalDraft);
+  return {visualRequests:0,mapCanvasRetained:true,filterRetained:true,saveReopen:true,png:true,embed:true,mobileWidth:390,style:stored};
+}

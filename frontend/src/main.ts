@@ -14,10 +14,13 @@ import {
   emptyConfig,
   type Bounds,
 } from './types';
-import { translator, type Translator } from './i18n';
+import { translator, serverMessage, type Translator } from './i18n';
 import { button, download, el, icon } from './dom';
 import { renderWidget, type Handle } from './render';
 import { connectStoryBridge } from './storyBridge';
+import { applyAppearance, normalizeStyle, resolveAppearance, presetStyle, contrastRatio, correctChartColor } from './appearance';
+import { changeEffect } from './changes';
+import { validateWidgets } from './validation';
 
 const TYPES: WidgetType[] = [
   'kpi',
@@ -65,6 +68,7 @@ class Dashboard {
   status!: HTMLElement;
   meta!: HTMLElement;
   toolbar!: HTMLElement;
+  guide!: HTMLElement;
   toast!: HTMLElement;
   empty!: HTMLElement;
   generation = 0;
@@ -75,6 +79,7 @@ class Dashboard {
   refreshTimer?: number;
   refreshPoll?: number;
   ready = false;
+  advancedOpen = false;
   storyReady?: () => void;
   layoutLoading = false;
   abort = new AbortController();
@@ -86,6 +91,7 @@ class Dashboard {
     this.t = translator(boot.lang);
     this.config = { ...emptyConfig(), ...clone(boot.config || emptyConfig()) };
     this.config.source = { ...emptyConfig().source, ...this.config.source };
+    this.config.style = normalizeStyle(this.config.style);
     this.config.widgets = this.config.widgets.map((widget) =>
       Object.assign(
         {
@@ -118,8 +124,12 @@ class Dashboard {
         this.dirty = true;
         this.updateToolbarState();
       });
-    this.form?.addEventListener('submit', () => {
+    this.form?.addEventListener('submit', (event) => {
       this.sync();
+      if (!this.validateSave()) {
+        event.preventDefault();
+        return;
+      }
       this.dirty = false;
     });
     window.addEventListener(
@@ -198,6 +208,8 @@ class Dashboard {
     this.status.setAttribute('role', 'status');
     this.status.setAttribute('aria-live', 'polite');
     this.filterBar = el('div', 'dbv-filter-bar');
+    this.guide = el('nav', 'dbv-guide');
+    this.guide.setAttribute('aria-label', this.t('guideHelp'));
     const workspace = el('div', 'dbv-workspace');
     this.catalog = el('aside', 'dbv-catalog');
     this.catalog.setAttribute('aria-label', this.t('add'));
@@ -211,14 +223,15 @@ class Dashboard {
     const footer = el('footer', 'dbv-footer');
     footer.append(
       el('span', '', this.t('keyboard')),
-      el('span', 'dbv-brand-credit', 'IHP-WINS · Citizen science'),
+      el('span', 'dbv-brand-credit', 'IHP-WINS'),
     );
     this.toast = el('div', 'dbv-toast');
     this.toast.setAttribute('role', 'status');
     this.toast.hidden = true;
-    shell.append(header, info, this.status, this.filterBar, workspace, footer, this.toast);
+    shell.append(header, info, this.status, this.guide, this.filterBar, workspace, footer, this.toast);
     this.root.append(shell);
     this.renderToolbar();
+    this.renderGuide();
     this.renderCatalog();
     this.renderInspector();
     this.renderFilters();
@@ -259,17 +272,17 @@ class Dashboard {
         this.mobile = !this.mobile;
         this.renderMode();
       },
-      'dbv-btn dbv-icon-only',
+      'dbv-btn',
       this.mobile ? 'desktop' : 'phone',
     );
     mobile.setAttribute('aria-pressed', String(this.mobile));
     this.toolbar.append(
       mobile,
-      button(t('export'), () => void this.exportCsv(), 'dbv-btn dbv-icon-only', 'download'),
+      button(t('export'), () => void this.exportCsv(), 'dbv-btn', 'download'),
     );
     if (this.boot.can_edit)
       this.toolbar.append(
-        button(t('refresh'), () => void this.refresh(), 'dbv-btn dbv-icon-only', 'refresh'),
+        button(t('refresh'), () => void this.refresh(), 'dbv-btn', 'refresh'),
       );
     this.toolbar.append(button(t('share'), () => this.share(), 'dbv-btn', 'share'));
     if (this.boot.mode === 'editor')
@@ -287,10 +300,129 @@ class Dashboard {
     const redo = this.toolbar.querySelector<HTMLButtonElement>('[data-dashboard-action="redo"]');
     if (redo) redo.disabled = !this.future.length;
   }
+  renderGuide() {
+    this.guide.hidden = this.boot.mode !== 'editor';
+    this.guide.replaceChildren();
+    if (this.guide.hidden) return;
+    const steps = ['reviewData', 'chooseBlocks', 'personalize', 'reviewSave'];
+    steps.forEach((key, index) => {
+      const control = button(`${index + 1}. ${this.t(key)}`, () => {
+        const wasPreview = this.preview;
+        this.preview = index === 3;
+        if (!this.preview) this.panel = ['data', 'blocks', 'appearance'][index];
+        if (wasPreview !== this.preview) this.renderMode();
+        else { this.renderCatalog(); this.renderGuide(); }
+        if (index === 3) this.notify(this.t('guideHelp'));
+      }, 'dbv-btn dbv-guide-step');
+      const active = this.preview ? index === 3 : ['data', 'blocks', 'appearance'][index] === this.panel;
+      if (active) control.setAttribute('aria-current', 'step');
+      this.guide.append(control);
+    });
+    this.guide.append(el('p', 'dbv-guide-help', this.t('guideHelp')));
+  }
+  renderAppearance() {
+    const t = this.t;
+    const panel = el('div', 'dbv-appearance');
+    panel.append(el('h3', 'dbv-panel-label', t('appearance')));
+    const presets = el('div', 'dbv-theme-presets');
+    for (const [name, key] of [['light', 'themeLight'], ['ocean', 'themeOcean'], ['dark', 'themeDark']] as const) {
+      const option = button(t(key), () => {
+        this.mutate(() => { this.config.style = presetStyle(name); }, false);
+        this.renderCatalog();
+        this.renderInspector();
+      }, 'dbv-btn dbv-theme-preset');
+      option.dataset.themePreset = name;
+      const sample = resolveAppearance(presetStyle(name));
+      const swatch = el('span', 'dbv-theme-swatch');
+      swatch.style.background = sample.background;
+      swatch.style.borderColor = sample.accent;
+      swatch.setAttribute('aria-hidden', 'true');
+      option.prepend(swatch);
+      presets.append(option);
+    }
+    panel.append(presets);
+    const style = normalizeStyle(this.config.style);
+    const appearance = resolveAppearance(style);
+    for (const [key, value] of [
+      ['background', style.background || appearance.background],
+      ['card_background', style.card_background || appearance.cardBackground],
+      ['accent', style.accent],
+    ] as const) {
+      const name = t(key === 'card_background' ? 'cardBackground' : key);
+      const row = el('div', 'dbv-color-control');
+      const color = this.input('color', value);
+      color.setAttribute('aria-label', name);
+      const hex = this.input('text', value);
+      hex.maxLength = 7;
+      hex.pattern = '#[0-9a-fA-F]{6}';
+      hex.setAttribute('aria-label', `${name} · HEX`);
+      const apply = (value: string) => {
+        if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+          hex.setAttribute('aria-invalid', 'true');
+          this.notify(t('invalidColor'));
+          return;
+        }
+        hex.removeAttribute('aria-invalid');
+        color.value = value;
+        hex.value = value;
+        this.mutate(() => { this.config.style[key] = value; }, false);
+        const colors = resolveAppearance(this.config.style).palette;
+        panel.querySelectorAll<HTMLElement>('.dbv-palette-swatch').forEach((swatch, index) => {
+          swatch.style.background = colors[index % colors.length];
+          swatch.title = colors[index % colors.length];
+        });
+        this.renderContrastNotice(panel);
+      };
+      color.addEventListener('change', () => apply(color.value));
+      hex.addEventListener('change', () => apply(hex.value));
+      row.append(color, hex);
+      const field = el('div', 'dbv-field');
+      field.append(el('span', 'dbv-field-label', name), row);
+      panel.append(field);
+    }
+    const palette = this.select('palette', [
+      ['ihp', t('paletteIhp')], ['accessible', t('paletteAccessible')], ['mono', t('paletteMono')],
+    ], style.palette);
+    palette.addEventListener('change', () => {
+      this.mutate(() => { this.config.style.palette = palette.value as typeof style.palette; }, false);
+      this.renderCatalog();
+    });
+    panel.append(this.label(t('palette'), palette), el('p', 'dbv-panel-description', t('paletteHelp')));
+    const swatches = el('div', 'dbv-palette-swatches');
+    for (const color of appearance.palette) {
+      const swatch = el('span', 'dbv-palette-swatch');
+      swatch.style.background = color;
+      swatch.title = color;
+      swatches.append(swatch);
+    }
+    panel.append(swatches);
+    this.renderContrastNotice(panel);
+    panel.append(button(t('resetAppearance'), () => {
+      this.mutate(() => { this.config.style = presetStyle('light'); }, false);
+      this.renderCatalog();
+      this.renderInspector();
+    }, 'dbv-btn dbv-btn-wide', 'undo'));
+    this.catalog.append(panel);
+  }
+  renderContrastNotice(panel: HTMLElement) {
+    panel.querySelector('.dbv-contrast-notice')?.remove();
+    const { cardBackground } = resolveAppearance(this.config.style);
+    const low = this.config.widgets.filter(w => !['table', 'text', 'doughnut'].includes(w.type) && contrastRatio(w.color, cardBackground) < 3);
+    if (!low.length) return;
+    const note = el('div', 'dbv-contrast-notice dbv-callout');
+    note.append(el('p', '', this.t('lowContrast')),
+      button(this.t('fixContrast'), () => {
+        this.mutate(() => { for (const widget of low) widget.color = correctChartColor(widget.color, cardBackground); }, false);
+        this.renderContrastNotice(panel);
+        this.renderInspector();
+      }, 'dbv-btn dbv-btn-small'));
+    panel.append(note);
+  }
   renderMode() {
     this.root.classList.toggle('dbv-preview', !this.editing());
     this.root.classList.toggle('dbv-mobile-preview', this.mobile);
     this.renderToolbar();
+    this.renderGuide();
     this.renderGrid();
     this.renderCatalog();
     this.renderInspector();
@@ -298,22 +430,71 @@ class Dashboard {
   sync() {
     this.hidden.value = JSON.stringify(this.config);
     this.dirty = this.hidden.value !== this.initial || this.boot.title !== this.initialTitle;
-    this.root.style.setProperty('--dbv-accent', this.config.style.accent);
+    applyAppearance(this.root, this.config.style);
   }
-  changed(previous?: Config, rebuild = true) {
-    if (previous) {
+  changed(previous: Config, rebuild = true, remember = true) {
+    const effect = changeEffect(previous, this.config);
+    if (remember) {
       this.history.push(previous);
       if (this.history.length > 60) this.history.shift();
       this.future = [];
     }
     this.sync();
     this.updateToolbarState();
+    if (effect === 'visual') {
+      this.updatePresentation(previous);
+      if (rebuild) this.renderInspector();
+      if (JSON.stringify(previous.filters) !== JSON.stringify(this.config.filters)) this.renderFilters();
+      return;
+    }
     if (rebuild) {
       this.renderGrid();
       this.renderInspector();
       this.renderFilters();
     }
-    this.scheduleQuery();
+    if (effect === 'source') {
+      clearTimeout(this.requestTimer);
+      this.queryRequest++;
+      this.ready = false;
+      this.filters = [];
+      this.bounds = null;
+      this.pages = {};
+      void this.loadProfile();
+    } else {
+      this.scheduleQuery();
+    }
+  }
+  updatePresentation(previous: Config) {
+    const appearance = resolveAppearance(this.config.style);
+    let layoutChanged = false;
+    this.layoutLoading = true;
+    this.grid?.batchUpdate();
+    for (const widget of this.config.widgets) {
+      const item = this.canvas.querySelector<HTMLElement>(`[data-widget-id="${widget.id}"]`);
+      if (!item) continue;
+      const old = previous.widgets.find(w => w.id === widget.id);
+      if (old && ['x', 'y', 'w', 'h'].some(key => old[key as 'x'] !== widget[key as 'x'])) {
+        layoutChanged = true;
+        this.grid?.update(item, { x: widget.x, y: widget.y, w: widget.w, h: widget.h });
+      }
+      item.querySelector<HTMLElement>('.dbv-widget')?.style.setProperty('--widget-color', widget.color);
+      const title = item.querySelector('.dbv-widget-title');
+      if (title) title.textContent = widget.title || this.t(widget.type);
+      if (this.editing()) item.querySelector('.dbv-widget-header')?.setAttribute('aria-label', `${widget.title}. ${this.t('keyboard')}`);
+      this.handles.get(widget.id)?.updateAppearance?.(appearance, widget);
+    }
+    this.grid?.batchUpdate(false);
+    // GridStack can move neighbors when a keyboard/button move collides with
+    // another block. Persist the resolved layout, never the mobile stacking.
+    if (layoutChanged && this.grid && this.grid.getColumn() !== 1) {
+      for (const node of this.grid.engine.nodes) {
+        const widget = this.config.widgets.find(w => w.id === node.id);
+        if (widget) Object.assign(widget, { x: node.x ?? 0, y: node.y ?? 0, w: node.w ?? 6, h: node.h ?? 4 });
+      }
+      this.sync();
+      this.updateToolbarState();
+    }
+    this.layoutLoading = false;
   }
   mutate(fn: () => void, rebuild = true) {
     const previous = clone(this.config);
@@ -323,22 +504,40 @@ class Dashboard {
   undo() {
     const old = this.history.pop();
     if (!old) return;
-    this.future.push(clone(this.config));
+    const previous = clone(this.config);
+    this.future.push(previous);
     this.config = old;
     this.sourceDraft = clone(old.source);
-    this.changed();
+    this.changed(previous, true, false);
     this.renderCatalog();
-    void this.loadProfile();
   }
   redo() {
     const next = this.future.pop();
     if (!next) return;
-    this.history.push(clone(this.config));
+    const previous = clone(this.config);
+    this.history.push(previous);
     this.config = next;
     this.sourceDraft = clone(next.source);
-    this.changed();
+    this.changed(previous, true, false);
     this.renderCatalog();
-    void this.loadProfile();
+  }
+  validateSave() {
+    if (!this.profile || !this.ready) {
+      this.notify(this.t('loading'));
+      return false;
+    }
+    const issues = validateWidgets(this.config, this.profile, this.t);
+    if (!this.config.widgets.length || issues.length) {
+      this.preview = false;
+      this.renderMode();
+      if (issues[0]) {
+        this.selectWidget(issues[0].widgetId);
+        this.inspector.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      }
+      this.notify(this.t('validationSummary'));
+      return false;
+    }
+    return true;
   }
   save() {
     this.sync();
@@ -396,12 +595,12 @@ class Dashboard {
       const data = await response.json();
       if (!active()) return null;
       if (data.status === 'pending' || response.status === 202) {
-        this.showStatus(data.message || this.t('processing'));
+        this.showStatus(serverMessage(data.message || this.t(path === 'query' ? 'loadingQuery' : 'loading'), this.t, data.code));
         await new Promise((resolve) => setTimeout(resolve, wait));
         wait = Math.min(4000, wait * 1.3);
         continue;
       }
-      if (!response.ok || data.status === 'error') throw Error(data.message || this.t('error'));
+      if (!response.ok || data.status === 'error') throw Error(serverMessage(data.message || this.t('error'), this.t, data.code));
       return data as T;
     }
     return null;
@@ -490,7 +689,7 @@ class Dashboard {
       ];
       if (warnings.length) {
         this.status.hidden = false;
-        this.status.append(icon('info'), el('span', '', warnings.join(' · ')));
+        this.status.append(icon('info'), el('span', '', warnings.map(message => serverMessage(message, this.t)).join(' · ')));
       }
       this.canvas.setAttribute('aria-busy', 'false');
       return true;
@@ -517,7 +716,7 @@ class Dashboard {
       );
       if (!response.ok && response.status !== 202) {
         const data = await response.json();
-        throw Error(data.message);
+        throw Error(serverMessage(data.message, this.t, data.code));
       }
       await this.loadProfile();
     } catch (error) {
@@ -539,7 +738,7 @@ class Dashboard {
             await new Promise((resolve) => setTimeout(resolve, 2000));
             continue;
           }
-          throw Error(data.message || this.t('exportError'));
+          throw Error(serverMessage(data.message || this.t('exportError'), this.t, data.code));
         }
         if (!response.ok) throw Error(this.t('exportError'));
         download(await response.blob(), `${this.boot.title || 'dashboard'}.csv`);
@@ -558,20 +757,25 @@ class Dashboard {
     const t = this.t;
     this.catalog.replaceChildren();
     const tabs = el('div', 'dbv-tabs');
-    for (const key of ['blocks', 'data']) {
+    for (const key of ['blocks', 'data', 'appearance']) {
       const tab = button(
-        t(key === 'blocks' ? 'design' : 'data'),
+        t(key === 'blocks' ? 'design' : key),
         () => {
           this.panel = key;
           this.renderCatalog();
+          this.renderGuide();
         },
         `dbv-tab ${this.panel === key ? 'is-active' : ''}`,
-        key === 'blocks' ? 'grid' : 'data',
+        key === 'blocks' ? 'grid' : key === 'data' ? 'data' : 'settings',
       );
       tab.setAttribute('aria-pressed', String(this.panel === key));
       tabs.append(tab);
     }
     this.catalog.append(tabs);
+    if (this.panel === 'appearance') {
+      this.renderAppearance();
+      return;
+    }
     if (this.panel === 'data') {
       this.renderSource();
       return;
@@ -600,7 +804,7 @@ class Dashboard {
       this.catalog.append(
         button(
           t(name),
-          () => this.template(name),
+          () => this.chooseTemplate(name),
           'dbv-template-mini',
           name === 'spatial' ? 'map' : name === 'timeSeries' ? 'line' : 'grid',
         ),
@@ -648,13 +852,6 @@ class Dashboard {
       );
       this.catalog.append(box);
     }
-    const color = this.input('color', this.config.style.accent);
-    color.addEventListener('change', () =>
-      this.mutate(() => {
-        this.config.style.accent = color.value;
-      }),
-    );
-    this.catalog.append(this.label(t('color'), color));
   }
   renderSource() {
     const t = this.t;
@@ -672,6 +869,8 @@ class Dashboard {
       draft.kind = kind.value as 'file' | 'datastore';
     });
     this.catalog.append(this.label(t('kind'), kind));
+    const advanced = el('details', 'dbv-inspector-section');
+    advanced.append(el('summary', '', t('advancedOptions')));
     const fields: [string, HTMLInputElement | HTMLSelectElement][] = [
       [
         'sheet',
@@ -728,8 +927,9 @@ class Dashboard {
         (draft as unknown as Record<string, unknown>)[key] = input.value || null;
       });
       if (key === 'date_format') (input as HTMLInputElement).placeholder = '%d/%m/%Y';
-      this.catalog.append(this.label(t(key), input));
+      (key === 'sheet' ? this.catalog : advanced).append(this.label(t(key), input));
     }
+    this.catalog.append(advanced);
     this.catalog.append(el('h3', 'dbv-panel-label', t('fieldTypes')));
     for (const field of this.profile?.fields ?? []) {
       const select = this.select(
@@ -755,14 +955,13 @@ class Dashboard {
       button(
         t('applySource'),
         () => {
+          if (JSON.stringify(this.config.source) === JSON.stringify(draft)) {
+            void this.loadProfile();
+            return;
+          }
           this.mutate(() => {
             this.config.source = clone(draft);
           }, false);
-          this.filters = [];
-          this.bounds = null;
-          this.pages = {};
-          this.queryRequest++;
-          void this.loadProfile();
         },
         'dbv-btn dbv-btn-primary dbv-btn-wide',
         'refresh',
@@ -820,13 +1019,45 @@ class Dashboard {
       .querySelector(`[data-widget-id="${widget.id}"]`)
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
-  template(name: string) {
+  chooseTemplate(name: string) {
+    if (!this.ready) return;
+    const t = this.t;
+    const fields = this.profile?.fields ?? [];
+    const values = fields.filter(f => f.type === 'number');
+    const suggested = values.find(f => !/^(lat(itude)?|lon(gitude)?|lng|id)$/i.test(f.key)) ?? values[0];
+    const dialog = el('dialog', 'dbv-dialog');
+    const header = el('div', 'dbv-dialog-head');
+    header.append(el('h3', '', t(name)), button(t('close'), () => dialog.close(), 'dbv-btn dbv-icon-only', 'close'));
+    const main = this.select('template_value', values.map(f => [f.key, f.label]), suggested?.key ?? '', true);
+    main.setAttribute('aria-label', t('mainVariable'));
+    const fieldsPreview = el('div', 'dbv-template-fields');
+    const update = () => {
+      const sample = this.newWidget(name === 'spatial' ? 'map' : name === 'timeSeries' ? 'line' : 'bar');
+      const names = name === 'spatial' ? [sample.lat_field, sample.lon_field] : [sample.x_field];
+      const category = fields.find(f => f.type === 'text' || f.type === 'boolean') ?? fields[0];
+      const filterFields = fields.filter(f => f.type === 'text' || f.type === 'date').slice(0, 2);
+      const fieldsUsed = [...new Set([...names, main.value, category?.key,
+        ...fields.slice(0, 8).map(f => f.key), ...filterFields.map(f => f.key)].filter(Boolean))];
+      fieldsPreview.textContent = `${t('templateFields')}: ${fieldsUsed.map(key => fields.find(f => f.key === key)?.label ?? key).join(' · ') || t('count')}`;
+    };
+    main.addEventListener('change', update);
+    update();
+    dialog.append(header, el('p', 'dbv-panel-description', t(name + 'Desc')),
+      this.label(t('mainVariable'), main), fieldsPreview,
+      button(t('applyTemplate'), () => { this.template(name, main.value); dialog.close(); }, 'dbv-btn dbv-btn-primary'),
+      button(t('cancel'), () => dialog.close(), 'dbv-btn'));
+    dialog.addEventListener('close', () => dialog.remove());
+    this.root.append(dialog);
+    dialog.showModal();
+  }
+  template(name: string, measure = '') {
     if (!this.ready) return;
     if (this.config.widgets.length && !window.confirm(this.t('replaceTemplate'))) return;
     const fields = this.profile?.fields ?? [];
     if (
       (name === 'timeSeries' && !fields.some((f) => f.type === 'date')) ||
-      (name === 'spatial' && !fields.some((f) => /^lat(itude)?$/i.test(f.key)))
+      (name === 'spatial' && (!fields.some((f) => f.type === 'number' && /^lat(itude)?$/i.test(f.key)) ||
+        !fields.some((f) => f.type === 'number' && /^(lon(gitude)?|lng)$/i.test(f.key))))
     ) {
       this.notify(this.t('templateUnavailable'));
       this.panel = 'data';
@@ -874,7 +1105,13 @@ class Dashboard {
     table.x = 0;
     table.w = 12;
     table.h = 4;
+    for (const widget of [b, c, d, left]) {
+      widget.y_field = measure || null;
+      if (!measure) widget.aggregate = 'count';
+      if (widget.type === 'kpi') widget.title = measure ? `${this.t(widget.aggregate)} · ${measure}` : this.t('count');
+    }
     this.selected = left.id;
+    this.bounds = null;
     this.mutate(() => {
       this.config.widgets = [a, b, c, d, left, right, table];
       this.config.filters = fields
@@ -905,7 +1142,7 @@ class Dashboard {
     for (const name of ['overview', 'timeSeries', 'spatial']) {
       const choice = button(
         this.t(name),
-        () => this.template(name),
+          () => this.chooseTemplate(name),
         'dbv-template-card',
         name === 'spatial' ? 'map' : name === 'timeSeries' ? 'line' : 'grid',
       );
@@ -1027,6 +1264,7 @@ class Dashboard {
           t: this.t,
           locale: this.boot.lang || 'en',
           basemap: this.boot.basemap_url,
+          appearance: resolveAppearance(this.config.style),
           filter: (filter) => this.setFilter(filter),
           bounds: (bounds) => {
             this.bounds = bounds;
@@ -1043,10 +1281,15 @@ class Dashboard {
     }
   }
   selectWidget(id: string | null, render = true) {
+    const previous = this.selected;
     this.selected = id;
     for (const item of this.canvas.querySelectorAll<HTMLElement>('[data-widget-id]'))
       item.classList.toggle('is-selected', this.editing() && item.dataset.widgetId === id);
     if (render) this.renderInspector();
+    if (render && id && window.matchMedia('(max-width: 950px)').matches)
+      this.inspector.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    if (render && !id && previous)
+      this.canvas.querySelector<HTMLElement>(`[data-widget-id="${previous}"] .dbv-widget-header`)?.focus({ preventScroll: true });
   }
   input(type: string, value: string) {
     const input = el('input', 'dbv-input');
@@ -1115,6 +1358,15 @@ class Dashboard {
       return;
     }
     this.inspector.append(el('span', 'dbv-widget-type', t(widget.type)));
+    const data = el('section', 'dbv-inspector-section');
+    data.append(el('h3', 'dbv-panel-label', t('data')));
+    const appearance = el('section', 'dbv-inspector-section');
+    appearance.append(el('h3', 'dbv-panel-label', t('appearance')));
+    const advanced = el('details', 'dbv-inspector-section');
+    advanced.open = this.advancedOpen;
+    advanced.append(el('summary', '', t('advancedOptions')));
+    advanced.addEventListener('toggle', () => { this.advancedOpen = advanced.open; });
+    this.inspector.append(data, appearance, advanced);
     const modify = (key: string, value: unknown) =>
       this.mutate(() => {
         (widget as unknown as Record<string, unknown>)[key] = value;
@@ -1122,7 +1374,8 @@ class Dashboard {
     const title = this.input('text', widget.title);
     title.maxLength = 200;
     title.addEventListener('change', () => modify('title', title.value));
-    this.inspector.append(this.label(t('title'), title));
+    title.dataset.property = 'title';
+    data.append(this.label(t('title'), title));
     const fields = this.profile?.fields ?? [];
     const fieldControl = (
       key: 'x_field' | 'y_field' | 'series_field' | 'lat_field' | 'lon_field',
@@ -1130,21 +1383,23 @@ class Dashboard {
     ) => {
       const select = this.select(
         key,
-        fields.filter((f) => !numeric || f.type === 'number').map((f) => [f.key, f.label]),
+        fields.filter((f) => !numeric || f.type === 'number' ||
+          (key === 'y_field' && widget.type === 'kpi' && ['min', 'max'].includes(widget.aggregate) && f.type === 'date')).map((f) => [f.key, f.label]),
         widget[key] ?? '',
         true,
       );
       select.addEventListener('change', () => modify(key, select.value || null));
-      this.inspector.append(this.label(t(key), select));
+      data.append(this.label(t(key), select));
     };
-    if (['line', 'area', 'bar', 'doughnut', 'scatter', 'histogram'].includes(widget.type))
+    if (['line', 'area', 'bar', 'doughnut', 'scatter', 'histogram', 'table'].includes(widget.type))
       fieldControl('x_field', widget.type === 'scatter' || widget.type === 'histogram');
     if (
       !['table', 'text', 'histogram'].includes(widget.type) &&
       (widget.aggregate !== 'count' || widget.type === 'scatter')
     )
       fieldControl('y_field', !['count', 'count_distinct'].includes(widget.aggregate));
-    if (['line', 'area', 'bar', 'scatter'].includes(widget.type)) fieldControl('series_field');
+    if (['line', 'area', 'bar', 'scatter'].includes(widget.type) ||
+      (widget.type === 'doughnut' && widget.series_field)) fieldControl('series_field');
     if (!['table', 'text', 'scatter', 'histogram'].includes(widget.type)) {
       const aggregate = this.select(
         'aggregate',
@@ -1152,7 +1407,7 @@ class Dashboard {
         widget.aggregate,
       );
       aggregate.addEventListener('change', () => modify('aggregate', aggregate.value));
-      this.inspector.append(this.label(t('aggregate'), aggregate));
+      data.append(this.label(t('aggregate'), aggregate));
     }
     if (widget.type === 'map') {
       fieldControl('lat_field', true);
@@ -1160,12 +1415,16 @@ class Dashboard {
     }
     if (widget.type === 'table') {
       const group = el('div', 'dbv-columns');
+      group.dataset.property = 'columns';
+      group.tabIndex = -1;
+      if (widget.columns?.some(key => !fields.some(field => field.key === key)))
+        group.append(button(t('allColumns'), () => modify('columns', []), 'dbv-btn dbv-btn-small'));
       for (const field of fields) {
         const checkbox = this.input('checkbox', '');
         checkbox.checked = !widget.columns?.length || widget.columns.includes(field.key);
         checkbox.addEventListener('change', () => {
           const visible = new Set(
-            widget.columns?.length ? widget.columns : fields.map((f) => f.key),
+            widget.columns?.length ? widget.columns.filter(key => fields.some(f => f.key === key)) : fields.map((f) => f.key),
           );
           checkbox.checked ? visible.add(field.key) : visible.delete(field.key);
           if (!visible.size) {
@@ -1178,7 +1437,7 @@ class Dashboard {
         label.append(checkbox, el('span', '', field.label));
         group.append(label);
       }
-      this.inspector.append(this.label(t('columns'), group));
+      data.append(this.label(t('columns'), group));
     }
     if (widget.type === 'text') {
       const text = el('textarea', 'dbv-input');
@@ -1187,16 +1446,25 @@ class Dashboard {
       text.maxLength = 10000;
       text.placeholder = t('textPlaceholder');
       text.addEventListener('change', () => modify('text', text.value));
-      this.inspector.append(this.label(t('text'), text));
+      data.append(this.label(t('text'), text));
     }
     if (!['table', 'text'].includes(widget.type)) {
-      const color = this.input('color', widget.color);
-      color.addEventListener('change', () => modify('color', color.value));
-      this.inspector.append(this.label(t('color'), color));
+      if (widget.type !== 'doughnut') {
+        const color = this.input('color', widget.color);
+        color.addEventListener('change', () => modify('color', color.value));
+        appearance.append(this.label(t('principalColor'), color));
+        const background = resolveAppearance(this.config.style).cardBackground;
+        if (contrastRatio(widget.color, background) < 3) {
+          appearance.append(el('p', 'dbv-field-error', t('lowContrast')),
+            button(t('fixContrast'), () => modify('color', correctChartColor(widget.color, background)), 'dbv-btn dbv-btn-small'));
+        }
+      }
+      if (widget.type === 'doughnut' || widget.series_field)
+        appearance.append(button(t('palette'), () => { this.panel = 'appearance'; this.selectWidget(null); this.renderCatalog(); this.renderGuide(); }, 'dbv-btn'));
       const unit = this.input('text', widget.unit || '');
       unit.maxLength = 40;
       unit.addEventListener('change', () => modify('unit', unit.value));
-      this.inspector.append(this.label(t('unit'), unit));
+      appearance.append(this.label(t('unit'), unit));
     }
     if (['bar', 'line', 'area', 'doughnut'].includes(widget.type)) {
       const limit = this.input('number', String(widget.limit));
@@ -1205,7 +1473,7 @@ class Dashboard {
       limit.addEventListener('change', () =>
         modify('limit', Math.max(1, Math.min(100, Number(limit.value) || 20))),
       );
-      this.inspector.append(this.label(t('limit'), limit));
+      advanced.append(this.label(t('limit'), limit));
     }
     if (!['kpi', 'text', 'table'].includes(widget.type)) {
       const legend = this.input('checkbox', '');
@@ -1213,7 +1481,7 @@ class Dashboard {
       legend.addEventListener('change', () => modify('show_legend', legend.checked));
       const label = el('label', 'dbv-check');
       label.append(legend, el('span', '', t('show_legend')));
-      this.inspector.append(label);
+      appearance.append(label);
     }
     if (widget.type === 'histogram') {
       const bins = this.input('number', String(widget.bins));
@@ -1222,7 +1490,7 @@ class Dashboard {
       bins.addEventListener('change', () =>
         modify('bins', Math.max(2, Math.min(100, Number(bins.value) || 20))),
       );
-      this.inspector.append(this.label(t('bins'), bins));
+      advanced.append(this.label(t('bins'), bins));
     }
     if (['line', 'area', 'bar'].includes(widget.type)) {
       const grain = this.select(
@@ -1231,7 +1499,7 @@ class Dashboard {
         widget.time_grain || 'none',
       );
       grain.addEventListener('change', () => modify('time_grain', grain.value));
-      this.inspector.append(this.label(t('time_grain'), grain));
+      data.append(this.label(t('time_grain'), grain));
     }
     if (!['kpi', 'text', 'map', 'scatter', 'table', 'histogram'].includes(widget.type)) {
       const sort = this.select(
@@ -1240,9 +1508,9 @@ class Dashboard {
         widget.sort || 'desc',
       );
       sort.addEventListener('change', () => modify('sort', sort.value));
-      this.inspector.append(this.label(t('sort'), sort));
+      advanced.append(this.label(t('sort'), sort));
     }
-    this.inspector.append(el('h3', 'dbv-panel-label', t('move')));
+    advanced.append(el('h3', 'dbv-panel-label', t('move')));
     const position = el('div', 'dbv-position-controls');
     for (const [key, dx, dy] of [
       ['left', -1, 0],
@@ -1253,7 +1521,7 @@ class Dashboard {
       position.append(
         button(t(key), () => this.move(widget, dx, dy, false), 'dbv-btn dbv-icon-only', key),
       );
-    this.inspector.append(position, el('h3', 'dbv-panel-label', t('resize')));
+    advanced.append(position, el('h3', 'dbv-panel-label', t('resize')));
     const sizes = el('div', 'dbv-size-controls');
     for (const [key, dx, dy] of [
       ['narrower', -1, 0],
@@ -1262,13 +1530,26 @@ class Dashboard {
       ['taller', 0, 1],
     ] as const)
       sizes.append(button(t(key), () => this.move(widget, dx, dy, true), 'dbv-btn dbv-btn-small'));
-    this.inspector.append(sizes);
+    advanced.append(sizes);
     const actions = el('div', 'dbv-inspector-actions');
     actions.append(
       button(t('duplicate'), () => this.duplicate(widget), 'dbv-btn', 'copy'),
       button(t('delete'), () => this.remove(widget), 'dbv-btn dbv-danger', 'trash'),
     );
     this.inspector.append(actions);
+    appearance.hidden = appearance.children.length === 1;
+    const issues = validateWidgets(this.config, this.profile, this.t).filter(issue => issue.widgetId === widget.id);
+    for (const [index, issue] of issues.entries()) {
+      const property = widget.type === 'histogram' && issue.field === 'y_field' ? 'x_field' : issue.field;
+      const input = this.inspector.querySelector<HTMLElement>(`[data-property="${property}"]`);
+      const message = el('p', 'dbv-field-error', issue.message);
+      message.id = `validation_${this.instance}_${widget.id}_${index}`;
+      if (input) {
+        input.setAttribute('aria-invalid', 'true');
+        input.setAttribute('aria-describedby', message.id);
+        (input.closest('.dbv-field') ?? input.parentElement)?.append(message);
+      } else data.append(message);
+    }
   }
   move(widget: Widget, dx: number, dy: number, size: boolean) {
     this.mutate(() => {
@@ -1381,6 +1662,11 @@ class Dashboard {
     const label = el('div', 'dbv-filter-label');
     label.append(icon('filter'), el('span', '', t('filters')));
     this.filterBar.append(label);
+    label.title = t('sharedFiltersHelp');
+    const description = el('p', 'dbv-filter-help', t('sharedFiltersHelp'));
+    if (this.filters.length || this.bounds)
+      description.append(el('strong', '', ` ${t('activeFilters')}: ${this.filters.length + (this.bounds ? 1 : 0)}`));
+    this.filterBar.append(description);
     for (const def of definitions) {
       const group = el('div', 'dbv-filter');
       const id = 'filter_' + this.instance + '_' + definitions.indexOf(def);
@@ -1565,7 +1851,7 @@ class Dashboard {
       el('h3', '', t('shareTitle')),
       button(t('close'), () => dialog.close(), 'dbv-btn dbv-icon-only', 'close'),
     );
-    dialog.append(head, el('p', 'dbv-muted', t('shareBody')));
+    dialog.append(head, el('p', 'dbv-muted', t('shareBody')), el('p', 'dbv-callout', t('shareOriginal')));
     if (!this.boot.view_id || !this.boot.view_url || !this.boot.embed_url) {
       dialog.append(el('p', 'dbv-callout', t('saveFirst')));
     } else {

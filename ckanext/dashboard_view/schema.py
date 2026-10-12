@@ -49,6 +49,20 @@ def _color(value):
     return value
 
 
+def normalize_style(value):
+    """Bound appearance to known tokens and literal colors, never CSS or URLs."""
+    if not isinstance(value, dict):
+        raise ValueError("Dashboard style must be an object.")
+    style = {
+        "accent": _color(value.get("accent", "#0069b4")),
+        "theme": _choice(value.get("theme", "light"), {"light", "dark"}, "dashboard theme"),
+        "palette": _choice(value.get("palette", "ihp"), {"ihp", "accessible", "mono"}, "chart palette"),
+    }
+    for name in ("background", "card_background"):
+        style[name] = None if value.get(name) is None else _color(value[name])
+    return style
+
+
 def normalize_source(value=None):
     """Return a bounded source interpretation, never a URL or filesystem path."""
     if value is None:
@@ -148,11 +162,8 @@ def normalize_config(value, allow_empty=False):
         filters.append({"field": _field(item.get("field")),
                         "type": _choice(item.get("type", "category"), {"category", "number", "date"}, "filter type"),
                         "label": _text(item.get("label", item.get("field", "")), "filter label")})
-    style = value.get("style", {})
-    if not isinstance(style, dict):
-        raise ValueError("Dashboard style must be an object.")
     return {"schema_version": 1, "source": normalize_source(value.get("source")), "widgets": widgets,
-            "filters": filters, "style": {"accent": _color(style.get("accent", "#0069b4"))}}
+            "filters": filters, "style": normalize_style(value.get("style", {}))}
 
 
 def validate_filters(filters, fields):

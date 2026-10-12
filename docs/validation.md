@@ -1,5 +1,39 @@
 # Validation record
 
+## Appearance and guided editing — 2026-10-12
+
+The DEV appearance release adds light/ocean/dark presets, scoped canvas/card/accent
+colors, palettes, guided authoring, contextual column validation and keyboard chart
+filters. Existing schema version 1 dashboards remain supported.
+
+Local release checks: **140 Python tests, 27 frontend tests**, TypeScript/Vite build
+and `git diff --check` passed. The Python suite includes backend authorization,
+source/query behavior and the extended appearance schema. These checks do not
+substitute for the public DEV rollout verification.
+
+Playwright against `scripts/dev_server.py --port 5191 --rows 2000` confirmed:
+
+- Appearance, undo/redo and keyboard layout changes make **zero profile/query
+  requests**, retain the category selection and keep the same map canvas.
+- Dark/custom appearance survives native form save, editor reopening, reader and
+  embed; PNG uses the card background and readable title/axes.
+- Desktop collision resolution matches serialized block positions; missing chart
+  fields prevent form submission and receive keyboard focus.
+- Keyboard chart-table actions apply the typed category filter. Template preview
+  shows the chosen variable, uses it on application and clears an obsolete map
+  extent without changing appearance.
+- ES/EN/FR mobile authoring, dark/custom surfaces, properties and guide fit 390px.
+  Focused-field single-click save still passes at desktop and mobile sizes.
+
+Run the functions in `scripts/browser_appearance_regression.js`,
+`scripts/browser_guidance_regression.js` and `scripts/browser_save_regression.js`
+using Playwright CLI `run-code` on the local harness. They refuse remote sites.
+Evidence is under `output/playwright/`, including the regression logs,
+`appearance-editor-dark.png`, `appearance-dark-chart.png` and
+`mobile-appearance-verification.json`. Runtime publication and the three DEV
+examples are recorded separately in the deployment repository's
+`docs/dashboard-ux-audit-dev.md`.
+
 The final verification results for this implementation are recorded here after the last code change. Raw benchmark reports, HTTP fixture IDs and browser artifacts live in `output/`, which is deliberately excluded from Git and container build contexts.
 
 Reproducible checks:

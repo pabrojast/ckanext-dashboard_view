@@ -57,4 +57,5 @@ async (page) => {
   } finally {
     page.off('request', countSave);
   }
+  return {singleClickSaves: posts, desktop: true, mobile: true, history: true};
 }
