@@ -214,3 +214,19 @@ def test_only_transient_failure_retains_valid_values(db, monkeypatch):
         cached, _ = store.cached('key')
         assert bool(cached.get('results')) == transient
         assert cached['error'] == 'Unavailable'
+
+
+def test_table_export_has_consistent_columns_and_escapes_formulas(web, monkeypatch):
+    import csv
+    import io
+    client, headers = web
+    cfg = config(blocks=[{'id':'b','source_id':'s','type':'table','title':'Table'}])
+    item = client.post('/api/simple-dashboards', json={'config': cfg}, headers=headers).json
+    monkeypatch.setattr(jobs, 'query', lambda *args: {'status':'ready','calculated_at':123,
+        'results':{'b':{'type':'table','columns':[{'key':'name','label':'Name'},{'key':'value','label':'Value'}],
+                        'rows':[{'name':'=CMD()', 'value':4}]}}})
+    response = client.post('/api/simple-dashboards/'+item['id']+'/export', json={'revision':1}, headers=headers)
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert all(len(row) == 7 for row in rows)
+    assert rows[1][3].startswith("'") and rows[2][3] == '4'
