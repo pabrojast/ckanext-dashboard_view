@@ -27,6 +27,8 @@ Same-origin `/api/simple-dashboards`:
 
 Cookie-authenticated writes/previews require CSRF. Anonymous saved/public reads cannot submit source definitions. All endpoints use private, no-store responses. Source read/download checks run before and after calculation and on every cached read; only owner/sysadmin edits. Public publication and reads recheck all sources as anonymous. Draft content is never implicitly published.
 
+Account state is checked against the current database on requests and queued calculations. A cookie or job created before account deactivation does not retain authoring, ownership or private-result access; inactive sysadmins have no bypass.
+
 ## Calculations and cache
 
 CSV/TSV/XLSX and DataStore reuse source authorization/materialization and the bounded DuckDB engine. GeoJSON FeatureCollection properties become a table; point coordinates are available as columns. Raster sources use a stored CKAN URL (COG or JSON `times` with one COG/date); physical conversion can come from TIFF metadata or stored `simple_dashboard_cog` resource metadata. Bodies in registered water pilots use the original analytics JSON and Terria WaterQuality functions. Local browser files are never accepted as shared server results.

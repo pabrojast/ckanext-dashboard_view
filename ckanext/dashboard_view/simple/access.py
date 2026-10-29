@@ -1,11 +1,10 @@
 """Visibility gates are evaluated before and after every cached query."""
-from . import store
+from . import store, identity
 from . import sources
 
 
 def owner(item, actor):
-    import ckan.model as model
-    user = model.User.get(actor) if actor else None
+    user = identity.active_user(actor)
     return bool(user and (item['owner'] == actor or user.sysadmin))
 
 

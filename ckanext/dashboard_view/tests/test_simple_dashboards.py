@@ -3,12 +3,13 @@ import copy
 import importlib
 import json
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
 from flask import Flask, g, request
-from ckanext.dashboard_view.simple import store, schema, access, sources, jobs, calculations
+from ckanext.dashboard_view.simple import store, schema, access, sources, jobs, calculations, identity
+from ckanext.dashboard_view.simple.sources import authorize_all as real_authorize_all
 from ckanext.dashboard_view import service
 
 RESOURCE = '12345678-1234-1234-1234-123456789012'
@@ -26,7 +27,7 @@ def db(monkeypatch, tmp_path):
     engine = sa.create_engine('sqlite:///' + str(tmp_path / 'dashboards.db'))
     store.init_db(engine)
     monkeypatch.setattr(store, 'engine', lambda: engine)
-    monkeypatch.setattr(access, 'owner', lambda item, actor: actor == item['owner'] or actor == 'admin')
+    monkeypatch.setattr(identity, 'active_user', lambda actor: SimpleNamespace(name=actor, sysadmin=actor == 'admin', state='active') if actor in ('reader', 'other', 'admin') else None)
     monkeypatch.setattr(sources, 'authorize_all', lambda *args, **kw: [{'id': RESOURCE, 'url': 'https://example.org/a.csv'}])
     return engine
 
@@ -241,3 +242,57 @@ def test_shared_date_range_uses_detected_date_column(db, tmp_path):
     values, warnings = sources.query_blocks(cfg['sources'][0], cfg['blocks'], path, {'start':'2026-02-01','end':'2026-02-28'})
     assert values['b']['value'] == 3
     assert not warnings
+
+
+def test_disabled_cookie_cannot_read_private_drafts_create_or_mutate(web, monkeypatch):
+    client, headers = web
+    base = '/api/simple-dashboards'
+    item = client.post(base, json={'config': config()}, headers=headers).json
+    monkeypatch.setattr(identity, 'active_user', lambda actor: None)
+    assert not client.get(base + '/config', headers=headers).json['authenticated']
+    assert client.get(base, headers=headers).status_code == 403
+    assert client.get(base + '/' + item['id'], headers=headers).status_code == 403
+    assert client.post(base, json={'config': config()}, headers=headers).status_code == 403
+    assert client.post(base + '/preview', json={'config': config()}, headers=headers).status_code == 403
+    assert client.post(base + '/' + item['id'] + '/publish', json={'publish': True}, headers=headers).status_code == 403
+    assert client.post(base + '/' + item['id'] + '/query', json={'revision': 1}, headers=headers).status_code == 403
+
+
+def test_disabled_queued_actor_cannot_reuse_previous_results(db, monkeypatch):
+    import fakeredis
+    redis = fakeredis.FakeRedis()
+    monkeypatch.setattr(service, 'redis_connection', lambda: redis)
+    monkeypatch.setattr(sources, 'authorize_all', real_authorize_all)
+    monkeypatch.setattr(identity, 'active_user', lambda actor: None)
+    store.put('revoked', {'results': {'b': {'value': 123}}})
+    redis.set('simple-dashboard:lock:revoked', 'claim')
+    with pytest.raises(PermissionError):
+        jobs.query(config(), 'reader')
+    jobs.execute('revoked', config(), 'reader', 'claim')
+    cached, _ = store.cached('revoked')
+    assert cached['error'] and not cached.get('results')
+
+
+@pytest.mark.parametrize('disabled_state', ['deleted', 'pending'])
+def test_identity_rechecks_database_after_account_revocation(monkeypatch, disabled_state):
+    from sqlalchemy.orm import declarative_base, sessionmaker
+    base = declarative_base()
+    class User(base):
+        __tablename__ = 'qa_user'
+        id = sa.Column(sa.String, primary_key=True)
+        name = sa.Column(sa.String)
+        state = sa.Column(sa.String)
+        sysadmin = sa.Column(sa.Boolean)
+    engine = sa.create_engine('sqlite://')
+    base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    user = User(id='one', name='reader', state='active', sysadmin=True)
+    session.add(user); session.commit()
+    ckan = ModuleType('ckan')
+    ckan.model = SimpleNamespace(Session=session, User=User)
+    monkeypatch.setitem(sys.modules, 'ckan', ckan)
+    assert identity.active_user('reader') is user
+    with engine.begin() as conn:
+        conn.execute(User.__table__.update().values(state=disabled_state))
+    assert identity.active_user('reader') is None
+    assert not access.owner({'owner':'reader'}, 'reader')
