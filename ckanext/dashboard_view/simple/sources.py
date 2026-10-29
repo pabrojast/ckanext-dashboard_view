@@ -112,9 +112,14 @@ def tabular(source, resource, actor, directory):
 
 def query_blocks(source, blocks, db, state):
     filters = list(source['filters'])
-    if source.get('date_field'):
+    profile = service.read_json(Path(db).parent / 'profile.json') or {}
+    date_field = source.get('date_field') or next((f['key'] for f in profile.get('fields', []) if f['type'] == 'date'), None)
+    if date_field:
         for key, op in [('start', 'gte'), ('end', 'lte')]:
             if state.get(key):
-                filters.append({'field': source['date_field'], 'op': op, 'value': state[key] + ('T23:59:59.999999' if key == 'end' else '')})
+                filters.append({'field': date_field, 'op': op, 'value': state[key] + ('T23:59:59.999999' if key == 'end' else '')})
     result = query_table(db, {'widgets': blocks}, filters=filters)
-    return result['results'], result.get('warnings', [])
+    warnings = list(result.get('warnings', []))
+    if (state.get('start') or state.get('end')) and not date_field:
+        warnings.append('This source has no date column; the shared date range was not applied.')
+    return result['results'], warnings
