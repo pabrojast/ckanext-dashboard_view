@@ -72,7 +72,8 @@ class DashboardViewPlugin(plugins.SingletonPlugin):
 
     def get_blueprint(self):
         from .blueprint import blueprint
-        return blueprint
+        from .simple.api import blueprint as simple_blueprint
+        return [blueprint, simple_blueprint]
 
     def get_helpers(self):
         from .helpers import dashboard_asset
