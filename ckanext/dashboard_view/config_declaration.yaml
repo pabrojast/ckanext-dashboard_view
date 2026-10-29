@@ -45,3 +45,13 @@ groups:
       - key: ckanext.dashboard_view.frame_ancestors
         default: '*'
         description: CSP frame-ancestors for the embed route. Does not grant dataset access.
+      - key: ckanext.dashboard_view.simple_enabled
+        default: false
+        type: bool
+        description: Enable the independent native Terria dashboard API after simple-init-db.
+      - key: ckanext.dashboard_view.simple_public_prefixes
+        default: ''
+        description: Space-separated public catalogue namespaces ending in slash. No credentials.
+      - key: ckanext.dashboard_view.simple_calculator
+        default: /opt/terria-calculator/dist/calculator.mjs
+        description: Fixed Node bundle built from the pinned Terria math core.

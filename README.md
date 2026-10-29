@@ -34,3 +34,7 @@ Run the CKAN package checks with `bash scripts/run-ckan-tests.sh`. Browser artif
 - Public embeds do not require login. Private dashboards retain authorization and are not published by sharing their link.
 
 Licensed under AGPL-3.0-or-later. Frontend dependency licenses and copyright notices are included in [THIRD_PARTY_NOTICES.txt](frontend/public/THIRD_PARTY_NOTICES.txt), which the frontend build copies alongside the distributed assets. Regenerate them after `npm ci` with `python3 scripts/collect-frontend-licenses.py`; use `--check` to verify that they match the lockfile and installed packages.
+
+## Native Terria simple dashboards
+
+An optional, separate API stores reusable multi-source dashboards and immutable revisions, with persistent server calculations. It defaults to disabled and does not change existing resource views. See [setup, permissions and API](docs/simple-dashboards.md).

@@ -1,0 +1,120 @@
+"""Reauthorize durable sources, materialize safe snapshots, reuse table engine."""
+import csv
+import json
+from pathlib import Path
+from urllib.parse import urlsplit
+from ..security import authorize_resource, download, SourceError
+from .. import service
+from ..engine import prepare_table, query_table
+from .schema import ENGINE_VERSION
+
+
+def trusted_url(url):
+    import ckan.plugins.toolkit as tk
+    prefixes = str(tk.config.get('ckanext.dashboard_view.simple_public_prefixes', '')).split()
+    parsed = urlsplit(url)
+    # Configured namespaces must end in a slash: lexical siblings cannot pass.
+    if parsed.query or parsed.fragment or parsed.username or parsed.password or not any(
+            p.endswith('/') and url.startswith(p) for p in prefixes):
+        raise SourceError('This source must first be registered in IHP.', 'source_unavailable')
+    return url
+
+
+def authorize(source, actor='', public=False):
+    if source.get('resource_id'):
+        resource, package = authorize_resource(source['resource_id'], '' if public else actor)
+        if public and package.get('private'):
+            raise SourceError('All sources must be public before publishing.')
+        return resource
+    trusted_url(source['catalog_url'])
+    return {'id': source['catalog_url'], 'url': source['catalog_url'], 'format': source['kind']}
+
+
+def authorize_all(config, actor='', public=False):
+    return [authorize(s, actor, public) for s in config['sources']]
+
+
+def snapshot(url, directory):
+    """Conditional validators + content hash; missing validators always download."""
+    key = service.digest(['snapshot', url])
+    root = service._root() / 'simple-sources'
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    previous = service.read_json(root / (key + '.json')) or {}
+    path = root / previous.get('sha256', 'missing')
+    validators = previous if path.is_file() else {}
+    temporary = Path(directory) / key
+    meta = download(url, temporary, service.setting('max_file_bytes'), validators)
+    if not meta.get('unchanged'):
+        path = root / meta['sha256']
+        temporary.replace(path)
+        service.atomic_json(root / (key + '.json'), meta)
+    else:
+        meta = previous
+    return path, meta['sha256']
+
+
+def json_snapshot(url, directory):
+    path, version = snapshot(url, directory)
+    with open(path, encoding='utf-8') as stream:
+        return json.load(stream), version
+
+
+def geojson_csv(path, output):
+    with open(path, encoding='utf-8') as stream:
+        data = json.load(stream)
+    features = data.get('features', [])
+    if data.get('type') != 'FeatureCollection' or len(features) > service.setting('max_rows'):
+        raise SourceError('Use a bounded GeoJSON FeatureCollection.')
+    names = list(dict.fromkeys(k for f in features for k in (f.get('properties') or {})))
+    if len(names) > 498:
+        raise SourceError('Too many GeoJSON properties.')
+    names += ['_longitude', '_latitude']
+    with open(output, 'w', encoding='utf-8', newline='') as stream:
+        writer = csv.DictWriter(stream, fieldnames=names)
+        writer.writeheader()
+        for feature in features:
+            row = {k: v if isinstance(v, (str, int, float, bool)) else None
+                   for k, v in (feature.get('properties') or {}).items()}
+            geom = feature.get('geometry') or {}
+            if geom.get('type') == 'Point':
+                row.update(zip(names[-2:], geom['coordinates'][:2]))
+            writer.writerow(row)
+
+
+def tabular(source, resource, actor, directory):
+    raw = Path(directory) / (source['id'] + '.raw')
+    interpretation = dict(source['source'])
+    if resource.get('datastore_active') and source['kind'] == 'table':
+        interpretation['kind'] = 'datastore'
+    meta, format_hint = service.materialize(resource, interpretation, raw, actor)
+    version = meta['sha256']
+    if source['kind'] == 'geojson':
+        converted = raw.with_suffix('.csv')
+        geojson_csv(raw, converted)
+        raw, format_hint = converted, 'csv'
+    key = service.digest(['simple-table', version, source['source'], ENGINE_VERSION])
+    target = service._root() / 'simple-tables' / key
+    target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    db = target / 'table.duckdb'
+    if not db.exists():
+        import tempfile
+        import os
+        with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+            profile = prepare_table(raw, Path(tmp) / 'table.duckdb', source['source'], format_hint)
+            service.atomic_json(Path(tmp) / 'profile.json', profile)
+            try:
+                os.rename(tmp, target)
+            except OSError:
+                if not db.exists():
+                    raise
+    return db, version, service.read_json(target / 'profile.json')
+
+
+def query_blocks(source, blocks, db, state):
+    filters = list(source['filters'])
+    if source.get('date_field'):
+        for key, op in [('start', 'gte'), ('end', 'lte')]:
+            if state.get(key):
+                filters.append({'field': source['date_field'], 'op': op, 'value': state[key] + ('T23:59:59.999999' if key == 'end' else '')})
+    result = query_table(db, {'widgets': blocks}, filters=filters)
+    return result['results'], result.get('warnings', [])

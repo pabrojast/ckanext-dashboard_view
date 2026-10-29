@@ -13,7 +13,7 @@ setup(
     include_package_data=True,
     zip_safe=False,
     install_requires=["duckdb==1.5.5", "openpyxl==3.1.5", "defusedxml>=0.7.1,<1", "requests>=2.31,<3", "setuptools>=68,<81"],
-    extras_require={"test": ["pytest>=7.4,<9", "build>=1,<2", "Flask-WTF>=1.0,<2"],
+    extras_require={"test": ["pytest>=7.4,<9", "SQLAlchemy>=1.4,<3", "fakeredis[lua]>=2,<3", "build>=1,<2", "Flask-WTF>=1.0,<2"],
                     "demo": ["Flask>=2.2,<3", "Werkzeug<3"]},
     entry_points={"ckan.plugins": ["dashboard_view=ckanext.dashboard_view.plugin:DashboardViewPlugin"]},
 )
