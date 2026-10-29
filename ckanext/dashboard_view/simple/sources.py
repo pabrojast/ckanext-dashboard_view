@@ -7,6 +7,7 @@ from ..security import authorize_resource, download, SourceError
 from .. import service
 from ..engine import prepare_table, query_table
 from .schema import ENGINE_VERSION
+from . import identity
 
 
 def trusted_url(url):
@@ -31,6 +32,8 @@ def authorize(source, actor='', public=False):
 
 
 def authorize_all(config, actor='', public=False):
+    if actor and not identity.active_user(actor):
+        raise PermissionError('This IHP account is no longer active.')
     return [authorize(s, actor, public) for s in config['sources']]
 
 

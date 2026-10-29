@@ -5,13 +5,18 @@ from functools import wraps
 from flask import Blueprint, jsonify, request, Response
 from flask_wtf.csrf import generate_csrf
 import ckan.plugins.toolkit as tk
-from ..blueprint import _actor, _body, _csrf
+from ..blueprint import _actor as _session_actor, _body, _csrf
 from ..security import SourceError
 from ..engine import _export_value
-from . import store, access, sources, jobs
+from . import store, access, sources, jobs, identity
 from .schema import normalize, state
 
 blueprint = Blueprint('simple_dashboard', __name__, url_prefix='/api/simple-dashboards')
+
+
+def _actor():
+    actor = _session_actor()
+    return actor if identity.active_user(actor) else ''
 
 
 def endpoint(fn):
