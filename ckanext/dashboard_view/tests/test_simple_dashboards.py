@@ -230,3 +230,14 @@ def test_table_export_has_consistent_columns_and_escapes_formulas(web, monkeypat
     rows = list(csv.reader(io.StringIO(response.text)))
     assert all(len(row) == 7 for row in rows)
     assert rows[1][3].startswith("'") and rows[2][3] == '4'
+
+
+def test_shared_date_range_uses_detected_date_column(db, tmp_path):
+    from ckanext.dashboard_view.engine import prepare_table
+    raw = tmp_path / 'dates.csv'; raw.write_text('date,value\n2026-01-01,1\n2026-02-01,3\n')
+    path = tmp_path / 'table.duckdb'; profile = prepare_table(raw, path)
+    service.atomic_json(tmp_path / 'profile.json', profile)
+    cfg = config()
+    values, warnings = sources.query_blocks(cfg['sources'][0], cfg['blocks'], path, {'start':'2026-02-01','end':'2026-02-28'})
+    assert values['b']['value'] == 3
+    assert not warnings
