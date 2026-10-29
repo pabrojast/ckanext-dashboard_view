@@ -162,18 +162,23 @@ def export(identifier):
         return jsonify(result), 202
     output = io.StringIO(newline='')
     writer = csv.writer(output)
-    writer.writerow(['block', 'label', 'value', 'unit', 'calculated_at', 'status'])
+    writer.writerow(['block', 'row', 'column', 'value', 'unit', 'calculated_at', 'status'])
     for block in config['blocks']:
         value = result['results'].get(block['id'], {})
         if value.get('error'):
             continue
-        rows = ([['', value.get('value')]] if block['type'] == 'kpi' else
-                value.get('rows', []) if block['type'] == 'table' else
-                list(zip(value.get('labels', []), (value.get('datasets') or [{}])[0].get('data', []))))
-        for row in rows:
-            if isinstance(row, dict):
-                row = list(row.values())
-            writer.writerow([_export_value(x) for x in [block['title'], *row, value.get('unit', ''), result.get('calculated_at'), result['status']]])
+        if block['type'] == 'kpi':
+            cells = [('', 'value', value.get('value'))]
+        elif block['type'] == 'table':
+            columns = [c if isinstance(c, str) else c['key'] for c in value.get('columns', [])]
+            cells = [(index + 1, column, row.get(column) if isinstance(row, dict) else row[j])
+                     for index, row in enumerate(value.get('rows', [])) for j, column in enumerate(columns)]
+        else:
+            cells = [(label, dataset.get('label', 'value'), dataset['data'][i])
+                     for dataset in value.get('datasets', []) for i, label in enumerate(value.get('labels', []))]
+        for row, column, cell in cells:
+            writer.writerow([_export_value(x) for x in [block['title'], row, column, cell,
+                            value.get('unit', ''), result.get('calculated_at'), result['status']]])
     access.read(str(identifier), _actor(), item['selected_revision'])
     return Response(output.getvalue(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename="dashboard.csv"'})
 
