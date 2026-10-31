@@ -2,7 +2,6 @@
 import csv
 import json
 from pathlib import Path
-import subprocess
 
 import fakeredis
 import pytest

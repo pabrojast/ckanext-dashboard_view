@@ -2,6 +2,7 @@
 import csv
 import json
 import shutil
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 from ..security import authorize_resource, download, SourceError
@@ -49,6 +50,8 @@ def snapshot(url, directory):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     previous = service.read_json(root / (key + '.json')) or {}
     path = root / previous.get('sha256', 'missing')
+    if path.is_file() and time.time() - previous.get('_checked_at', 0) < 300:
+        return path, previous['sha256']
     validators = previous if path.is_file() else {}
     temporary = Path(directory) / key
     meta = download(url, temporary, service.setting('max_file_bytes'), validators)
@@ -58,6 +61,8 @@ def snapshot(url, directory):
         service.atomic_json(root / (key + '.json'), meta)
     else:
         meta = previous
+    meta['_checked_at'] = time.time()
+    service.atomic_json(root / (key + '.json'), meta)
     return path, meta['sha256']
 
 
@@ -90,6 +95,13 @@ def geojson_csv(path, output):
 
 
 def tabular(source, resource, actor, directory):
+    generation_root = service._root() / 'simple-tables'
+    latest_key = service.digest([ENGINE_VERSION, source, service.resource_stamp(resource), actor])
+    latest_path = generation_root / ('latest-' + latest_key + '.json')
+    previous = service.read_json(latest_path) or {}
+    previous_db = generation_root / previous.get('generation', 'missing') / 'table.duckdb'
+    if previous_db.is_file() and time.time() - previous.get('checked_at', 0) < 300:
+        return previous_db, previous['version'], service.read_json(previous_db.parent / 'profile.json')
     raw = Path(directory) / (source['id'] + '.raw')
     interpretation = dict(source['source'])
     if resource.get('datastore_active') and source['kind'] == 'table':
@@ -117,6 +129,7 @@ def tabular(source, resource, actor, directory):
             except OSError:
                 if not db.exists():
                     raise
+    service.atomic_json(latest_path, {'generation': key, 'version': version, 'checked_at': time.time()})
     return db, version, service.read_json(target / 'profile.json')
 
 
