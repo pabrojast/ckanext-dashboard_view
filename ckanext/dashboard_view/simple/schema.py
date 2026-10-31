@@ -6,7 +6,7 @@ from datetime import date
 from uuid import UUID
 from ..schema import normalize_config, normalize_source
 
-ENGINE_VERSION = 'simple-1'
+ENGINE_VERSION = 'simple-2-spatial'
 
 
 def identifier(value):
@@ -42,9 +42,37 @@ def geometry(value):
     return {'type': value['type'], 'coordinates': coordinates}
 
 
+def bounds(value):
+    if not isinstance(value, dict):
+        raise ValueError('A geographic extent is required.')
+    keys = ('west', 'south', 'east', 'north')
+    if any(type(value.get(k)) not in (int, float) or not math.isfinite(value[k]) for k in keys):
+        raise ValueError('Invalid map bounds.')
+    w, south, e, north = [value[k] for k in keys]
+    if not (-180 <= w <= 180 and -180 <= e <= 180 and -90 <= south < north <= 90) or w == e or (w == 180 and e == -180):
+        raise ValueError('Invalid map bounds.')
+    return {k: round(value[k], 7) for k in keys}
+
+
+def spatial(value):
+    if not isinstance(value, dict) or value.get('mode') not in ('configured', 'viewport', 'fixed'):
+        raise ValueError('Invalid spatial mode.')
+    mode = value['mode']
+    quality = value.get('quality', 'quick')
+    if quality not in ('quick', 'native') or (quality == 'native' and mode != 'fixed'):
+        raise ValueError('Fix an area before requesting native resolution.')
+    return {'mode': mode, 'quality': quality,
+            **({'bounds': bounds(value.get('bounds'))} if mode != 'configured' else {}),
+            'approximate': value.get('approximate') is True}
+
+
 def state(value=None):
     value = value or {}
+    if not isinstance(value, dict):
+        raise ValueError('Invalid dashboard state.')
     result = {'start': None, 'end': None, 'area': geometry(value.get('area'))}
+    if value.get('spatial') is not None:
+        result['spatial'] = spatial(value['spatial'])
     for key in ('start', 'end'):
         if value.get(key):
             result[key] = date.fromisoformat(value[key]).isoformat()
@@ -90,7 +118,10 @@ def normalize(value, allow_empty=False):
                            'source': normalize_source(source.get('source')),
                            'date_field': source.get('date_field') or None,
                            'filters': filters, 'product': source.get('product'),
-                           'resolution': source.get('resolution', 'monthly')})
+                           'resolution': source.get('resolution', 'monthly'),
+                           'latitude_field': text(source['latitude_field'], 200) if source.get('latitude_field') else None,
+                           'longitude_field': text(source['longitude_field'], 200) if source.get('longitude_field') else None,
+                           'analysis_resource_id': str(UUID(source['analysis_resource_id'])) if source.get('analysis_resource_id') else None})
     raw = value.get('blocks', [])
     if not isinstance(raw, list) or len(raw) > 6 or (not raw and not allow_empty):
         raise ValueError('Add between one and six blocks.')
@@ -102,10 +133,13 @@ def normalize(value, allow_empty=False):
         body_id = block.get('body_id')
         if body_id is not None and (type(body_id) is not int or body_id < 0):
             raise ValueError('Choose a water body.')
+        body_scope = block.get('body_scope', 'fixed')
+        if body_scope not in ('fixed', 'viewport'):
+            raise ValueError('Invalid water body selection.')
         band = block.get('band', 1)
         if type(band) is not int or not 1 <= band <= 256:
             raise ValueError('Invalid raster band.')
-        blocks.append(dict(widget, source_id=block['source_id'], body_id=body_id, band=band,
+        blocks.append(dict(widget, source_id=block['source_id'], body_id=body_id, body_scope=body_scope, band=band,
                            area=geometry(block.get('area'))))
     return {'version': 1, 'title': text(value.get('title', 'Dashboard')), 'sources': normalized,
             'blocks': blocks, 'state': state(value.get('state'))}
