@@ -417,7 +417,7 @@ def _filter_value(value, kind):
     return str(value)
 
 
-def _where(filters, fields, config, bounds=None, prefix=""):
+def _where(filters, fields, config, bounds=None, prefix="", coordinates=None):
     expressions, parameters = [], []
     for item in validate_filters(filters, fields):
         field, op = item["field"], item["op"]
@@ -462,9 +462,14 @@ def _where(filters, fields, config, bounds=None, prefix=""):
         if widget_id is not None and (not isinstance(widget_id, str) or len(widget_id) > 80):
             raise ValueError("Invalid map block identifier.")
         map_widget = next((widget for widget in config["widgets"] if widget["type"] == "map" and (widget_id is None or widget["id"] == widget_id) and widget.get("lat_field") in fields and widget.get("lon_field") in fields and fields[widget["lat_field"]]["type"] == fields[widget["lon_field"]]["type"] == "number"), None)
+        if coordinates is not None:
+            if any(coordinates.get(k) not in fields or fields[coordinates[k]]["type"] != "number" for k in ("lat_field", "lon_field")):
+                raise ValueError("Choose valid numeric coordinate columns.")
+            map_widget = coordinates
         if not map_widget:
             raise ValueError("A map with valid coordinate columns is required to filter an area.")
         lat, lon = [prefix + _quote(map_widget[name]) for name in ("lat_field", "lon_field")]
+        expressions.append("(%s BETWEEN -90 AND 90 AND %s BETWEEN -180 AND 180)" % (lat, lon))
         expressions.append("%s BETWEEN ? AND ?" % lat)
         parameters.extend([south, north])
         expressions.append("(%s >= ? OR %s <= ?)" % (lon, lon) if west > east else "%s BETWEEN ? AND ?" % lon)
@@ -652,7 +657,7 @@ def _facets(connection, config, fields, filters, bounds):
     return {"facets": facets, "ranges": ranges, "facets_truncated": truncated}
 
 
-def query_table(db_path, config, filters=None, bounds=None, pages=None):
+def query_table(db_path, config, filters=None, bounds=None, pages=None, coordinates=None, row_ids=None):
     config = normalize_config(config, allow_empty=True)
     if pages is not None and (not isinstance(pages, dict) or len(pages) > 24):
         raise ValueError("Table pages must be an object.")
@@ -662,7 +667,12 @@ def query_table(db_path, config, filters=None, bounds=None, pages=None):
     timer.start()
     try:
         fields = {field["key"]: field for field in profile["fields"]}
-        where, params = _where(filters, fields, config, bounds)
+        where, params = _where(filters, fields, config, bounds, coordinates=coordinates)
+        if row_ids is not None:
+            if not isinstance(row_ids, list) or len(row_ids) > DEFAULT_LIMITS["max_rows"] or any(type(i) is not int or i < 0 for i in row_ids):
+                raise ValueError("Invalid spatial row selection.")
+            where += " AND %s IN (SELECT unnest(?::BIGINT[]))" % _quote(_ROW_KEY)
+            params.append(row_ids)
         count = connection.execute("SELECT count(*) FROM data WHERE " + where, params).fetchone()[0]
         results = {}
         for widget in config["widgets"]:
@@ -672,7 +682,10 @@ def query_table(db_path, config, filters=None, bounds=None, pages=None):
                     result = {"type": "text", "text": widget["text"]}
                 elif kind == "kpi":
                     value = connection.execute("SELECT %s FROM data WHERE %s" % (_aggregate(widget, fields), where), params).fetchone()[0]
-                    result = {"type": "kpi", "value": _measure(value), "count": count}
+                    valid = count
+                    if widget.get("y_field") in fields:
+                        valid = connection.execute("SELECT count(%s) FROM data WHERE %s" % (_quote(widget["y_field"]), where), params).fetchone()[0]
+                    result = {"type": "kpi", "value": _measure(value), "count": count, "valid_count": valid}
                 elif kind == "table":
                     result = _table_result(connection, widget, fields, where, params, count, pages)
                 elif kind == "histogram":

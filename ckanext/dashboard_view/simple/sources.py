@@ -1,6 +1,8 @@
 """Reauthorize durable sources, materialize safe snapshots, reuse table engine."""
 import csv
 import json
+import shutil
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 from ..security import authorize_resource, download, SourceError
@@ -34,7 +36,11 @@ def authorize(source, actor='', public=False):
 def authorize_all(config, actor='', public=False):
     if actor and not identity.active_user(actor):
         raise PermissionError('This IHP account is no longer active.')
-    return [authorize(s, actor, public) for s in config['sources']]
+    resources = [authorize(s, actor, public) for s in config['sources']]
+    for source in config['sources']:
+        if source.get('analysis_resource_id'):
+            authorize({'resource_id': source['analysis_resource_id']}, actor, public)
+    return resources
 
 
 def snapshot(url, directory):
@@ -44,6 +50,8 @@ def snapshot(url, directory):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     previous = service.read_json(root / (key + '.json')) or {}
     path = root / previous.get('sha256', 'missing')
+    if path.is_file() and time.time() - previous.get('_checked_at', 0) < 300:
+        return path, previous['sha256']
     validators = previous if path.is_file() else {}
     temporary = Path(directory) / key
     meta = download(url, temporary, service.setting('max_file_bytes'), validators)
@@ -53,6 +61,8 @@ def snapshot(url, directory):
         service.atomic_json(root / (key + '.json'), meta)
     else:
         meta = previous
+    meta['_checked_at'] = time.time()
+    service.atomic_json(root / (key + '.json'), meta)
     return path, meta['sha256']
 
 
@@ -71,7 +81,7 @@ def geojson_csv(path, output):
     names = list(dict.fromkeys(k for f in features for k in (f.get('properties') or {})))
     if len(names) > 498:
         raise SourceError('Too many GeoJSON properties.')
-    names += ['_longitude', '_latitude']
+    names = [n for n in names if n not in ('_longitude', '_latitude')] + ['_longitude', '_latitude']
     with open(output, 'w', encoding='utf-8', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=names)
         writer.writeheader()
@@ -85,6 +95,13 @@ def geojson_csv(path, output):
 
 
 def tabular(source, resource, actor, directory):
+    generation_root = service._root() / 'simple-tables'
+    latest_key = service.digest([ENGINE_VERSION, source, service.resource_stamp(resource), actor])
+    latest_path = generation_root / ('latest-' + latest_key + '.json')
+    previous = service.read_json(latest_path) or {}
+    previous_db = generation_root / previous.get('generation', 'missing') / 'table.duckdb'
+    if previous_db.is_file() and time.time() - previous.get('checked_at', 0) < 300:
+        return previous_db, previous['version'], service.read_json(previous_db.parent / 'profile.json')
     raw = Path(directory) / (source['id'] + '.raw')
     interpretation = dict(source['source'])
     if resource.get('datastore_active') and source['kind'] == 'table':
@@ -104,12 +121,15 @@ def tabular(source, resource, actor, directory):
         import os
         with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
             profile = prepare_table(raw, Path(tmp) / 'table.duckdb', source['source'], format_hint)
+            if source['kind'] == 'geojson':
+                shutil.copyfile(Path(directory) / (source['id'] + '.raw'), Path(tmp) / 'geometry.json')
             service.atomic_json(Path(tmp) / 'profile.json', profile)
             try:
                 os.rename(tmp, target)
             except OSError:
                 if not db.exists():
                     raise
+    service.atomic_json(latest_path, {'generation': key, 'version': version, 'checked_at': time.time()})
     return db, version, service.read_json(target / 'profile.json')
 
 
@@ -121,7 +141,11 @@ def query_blocks(source, blocks, db, state):
         for key, op in [('start', 'gte'), ('end', 'lte')]:
             if state.get(key):
                 filters.append({'field': date_field, 'op': op, 'value': state[key] + ('T23:59:59.999999' if key == 'end' else '')})
-    result = query_table(db, {'widgets': blocks}, filters=filters)
+    from .spatial import table_selection
+    selection, scope = table_selection(source, db, state, profile)
+    result = query_table(db, {'widgets': blocks}, filters=filters, **selection)
+    for value in result['results'].values():
+        value['spatial_scope'] = scope
     warnings = list(result.get('warnings', []))
     if (state.get('start') or state.get('end')) and not date_field:
         warnings.append('This source has no date column; the shared date range was not applied.')

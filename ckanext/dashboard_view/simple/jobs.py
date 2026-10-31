@@ -4,14 +4,14 @@ import time
 import uuid
 from .. import service
 from ..security import SourceError
-from . import store, sources
+from . import store, sources, result_cache
 from .schema import ENGINE_VERSION
 
 
 def query(config, actor):
     resources = sources.authorize_all(config, actor)
     key = service.digest([ENGINE_VERSION, config, [service.resource_stamp(r) for r in resources]])
-    previous, checked = store.cached(key)
+    previous, checked = result_cache.cached(key, config['state'])
     redis = service.redis_connection()
     lock = 'simple-dashboard:lock:' + key
     if time.time() - checked >= 300:
@@ -53,11 +53,11 @@ def execute(key, config, actor, claim):
             value = calculate(config, actor, directory)
     except Exception as exc:
         # Only transient source failures retain the previous valid calculation.
-        previous, _ = store.cached(key)
+        previous, _ = result_cache.cached(key, config['state'])
         transient = isinstance(exc, SourceError) and exc.code == 'source_temporarily_unavailable'
         value = dict(previous or {}) if transient else {}
         value.update(error=str(exc) if isinstance(exc, (SourceError, ValueError)) else 'The source is unavailable or access has changed.')
     if redis.get(lock) in (claim, claim.encode()):
-        store.put(key, value)
+        result_cache.put(key, value, config['state'])
     release(redis, lock, claim)
     redis.zrem('simple-dashboard:actor:' + service.digest(actor or 'anonymous'), claim)

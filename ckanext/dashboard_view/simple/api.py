@@ -163,11 +163,14 @@ def export(identifier):
     if 'state' in data:
         config = dict(config, state=state(data['state']))
     result = jobs.query(config, _actor())
-    if not result.get('results'):
+    if not result.get('results') or result.get('refreshing'):
         return jsonify(result), 202
     output = io.StringIO(newline='')
     writer = csv.writer(output)
     writer.writerow(['block', 'row', 'column', 'value', 'unit', 'calculated_at', 'status'])
+    import json
+    if config['state'].get('spatial'):
+        writer.writerow(['__context__', '', 'state', json.dumps(config['state'], ensure_ascii=False), '', result.get('calculated_at'), result['status']])
     for block in config['blocks']:
         value = result['results'].get(block['id'], {})
         if value.get('error'):
